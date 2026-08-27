@@ -1,6 +1,8 @@
-from typing import Dict, Any, Optional
+import requests
+from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, status
-from app.core.firebase import get_firestore_client
+from app.core.config import settings
+from app.core.auth import AuthenticatedUser
 from app.schemas.candidate import (
     CandidateEvidence,
     ExperienceItem,
@@ -12,15 +14,104 @@ from app.schemas.candidate import (
 from app.schemas.analyze import AnalyzeResponse
 
 
-async def load_master_profile(uid: str) -> CandidateEvidence:
-    """Loads the master Career Profile from Firestore subcollections."""
-    db = get_firestore_client()
-    user_ref = db.collection("users").document(uid)
+def _decode_firestore_value(val: Any) -> Any:
+    """Decodes a single Firestore REST JSON field value to a native Python object."""
+    if not isinstance(val, dict):
+        return val
+    if "stringValue" in val:
+        return val["stringValue"]
+    if "booleanValue" in val:
+        return val["booleanValue"]
+    if "integerValue" in val:
+        return int(val["integerValue"])
+    if "doubleValue" in val:
+        return float(val["doubleValue"])
+    if "timestampValue" in val:
+        return val["timestampValue"]
+    if "nullValue" in val:
+        return None
+    if "arrayValue" in val:
+        values = val.get("arrayValue", {}).get("values", [])
+        return [_decode_firestore_value(v) for v in values]
+    if "mapValue" in val:
+        fields = val.get("mapValue", {}).get("fields", {})
+        return {k: _decode_firestore_value(v) for k, v in fields.items()}
+    return val
 
-    profile_snap = user_ref.collection("profile").document("main").get()
-    profile_data = profile_snap.to_dict() if profile_snap.exists else {}
 
-    exp_snaps = user_ref.collection("experience").stream()
+def _decode_firestore_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Decodes all fields in a Firestore REST document."""
+    fields = doc.get("fields", {})
+    return {k: _decode_firestore_value(v) for k, v in fields.items()}
+
+
+def _encode_firestore_value(val: Any) -> Dict[str, Any]:
+    """Encodes a native Python value into Firestore REST JSON format."""
+    if val is None:
+        return {"nullValue": None}
+    if isinstance(val, bool):
+        return {"booleanValue": val}
+    if isinstance(val, int):
+        return {"integerValue": str(val)}
+    if isinstance(val, float):
+        return {"doubleValue": val}
+    if isinstance(val, str):
+        return {"stringValue": val}
+    if isinstance(val, list):
+        return {
+            "arrayValue": {
+                "values": [_encode_firestore_value(v) for v in val]
+            }
+        }
+    if isinstance(val, dict):
+        return {
+            "mapValue": {
+                "fields": {k: _encode_firestore_value(v) for k, v in val.items()}
+            }
+        }
+    return {"stringValue": str(val)}
+
+
+def _encode_firestore_fields(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Encodes a dictionary of fields into a Firestore REST fields map."""
+    return {k: _encode_firestore_value(v) for k, v in data.items()}
+
+
+def _get_firestore_base_url() -> str:
+    return f"https://firestore.googleapis.com/v1/projects/{settings.FIREBASE_PROJECT_ID}/databases/(default)/documents"
+
+
+async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
+    """Loads the candidate's master profile from Firestore."""
+    base_url = f"{_get_firestore_base_url()}/users/{user.uid}"
+    headers = {"Authorization": f"Bearer {user.token}"}
+
+    # 1. Main Profile
+    profile_data: Dict[str, Any] = {}
+    try:
+        res = requests.get(f"{base_url}/profile/main", headers=headers, timeout=10)
+        if res.status_code == 200:
+            profile_data = _decode_firestore_doc(res.json())
+    except Exception:
+        pass
+
+    # 2. Subcollections helper
+    def fetch_subcollection(name: str) -> List[Dict[str, Any]]:
+        try:
+            res = requests.get(f"{base_url}/{name}", headers=headers, timeout=10)
+            if res.status_code == 200:
+                docs = res.json().get("documents", [])
+                return [_decode_firestore_doc(d) for d in docs]
+        except Exception:
+            pass
+        return []
+
+    exp_docs = fetch_subcollection("experience")
+    proj_docs = fetch_subcollection("projects")
+    skill_docs = fetch_subcollection("skills")
+    edu_docs = fetch_subcollection("education")
+    cert_docs = fetch_subcollection("certifications")
+
     experience = [
         ExperienceItem(
             role=d.get("role", ""),
@@ -31,10 +122,9 @@ async def load_master_profile(uid: str) -> CandidateEvidence:
             bullets=d.get("bullets", []),
             technologies=d.get("technologies", []),
         )
-        for d in (s.to_dict() for s in exp_snaps)
+        for d in exp_docs
     ]
 
-    proj_snaps = user_ref.collection("projects").stream()
     projects = [
         ProjectItem(
             title=d.get("title", ""),
@@ -43,36 +133,33 @@ async def load_master_profile(uid: str) -> CandidateEvidence:
             highlights=d.get("highlights", []),
             tech_stack=d.get("techStack", []),
         )
-        for d in (s.to_dict() for s in proj_snaps)
+        for d in proj_docs
     ]
 
-    skill_snaps = user_ref.collection("skills").stream()
     skills = [
         SkillItem(
             name=d.get("name", ""),
             category=d.get("category", "Technical"),
             proficiency=d.get("proficiency", "Intermediate"),
         )
-        for d in (s.to_dict() for s in skill_snaps)
+        for d in skill_docs
     ]
 
-    edu_snaps = user_ref.collection("education").stream()
     education = [
         EducationItem(
             degree=d.get("degree", ""),
             institution=d.get("institution", ""),
             field_of_study=d.get("fieldOfStudy", ""),
         )
-        for d in (s.to_dict() for s in edu_snaps)
+        for d in edu_docs
     ]
 
-    cert_snaps = user_ref.collection("certifications").stream()
     certifications = [
         CertificationItem(
             title=d.get("title", ""),
             issuer=d.get("issuer", ""),
         )
-        for d in (s.to_dict() for s in cert_snaps)
+        for d in cert_docs
     ]
 
     return CandidateEvidence(
@@ -86,29 +173,43 @@ async def load_master_profile(uid: str) -> CandidateEvidence:
     )
 
 
-async def get_candidate_resume_data(uid: str, resume_id: str) -> CandidateEvidence:
+async def get_candidate_resume_data(
+    user: AuthenticatedUser, resume_id: str
+) -> CandidateEvidence:
     """
-    Resolves candidate resume evidence strictly from Firestore.
-    Prioritizes immutable resume.snapshot; falls back to master profile for legacy resumes.
+    Resolves candidate resume evidence strictly from Firestore scoped to user.uid.
+    Prioritizes immutable resume.snapshot; falls back to master profile.
     """
     if resume_id == "workspace":
-        return await load_master_profile(uid)
+        return await load_master_profile(user)
 
-    db = get_firestore_client()
-    resume_doc_ref = db.collection("users").document(uid).collection("resumes").document(resume_id)
-    doc_snap = resume_doc_ref.get()
+    doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
+    headers = {"Authorization": f"Bearer {user.token}"}
 
-    if not doc_snap.exists:
+    try:
+        res = requests.get(doc_url, headers=headers, timeout=10)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Failed to communicate with Firestore: {str(e)}",
+        )
+
+    if res.status_code == 404:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Resume with ID '{resume_id}' was not found or is inaccessible.",
         )
+    elif res.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN if res.status_code == 403 else status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Access denied or error loading resume document.",
+        )
 
-    resume_data = doc_snap.to_dict() or {}
+    resume_data = _decode_firestore_doc(res.json())
     snapshot = resume_data.get("snapshot")
 
     # Priority 1: Immutable Snapshot
-    if snapshot:
+    if snapshot and isinstance(snapshot, dict):
         profile = snapshot.get("profile", {})
         experiences = [
             ExperienceItem(
@@ -167,18 +268,18 @@ async def get_candidate_resume_data(uid: str, resume_id: str) -> CandidateEviden
         )
 
     # Priority 2: Legacy fallback
-    return await load_master_profile(uid)
+    return await load_master_profile(user)
 
 
 async def persist_analysis_results(
-    uid: str, resume_id: str, analysis: AnalyzeResponse
+    user: AuthenticatedUser, resume_id: str, analysis: AnalyzeResponse
 ) -> None:
-    """Persists analysis results to Firestore document."""
+    """Persists analysis results to the user's Firestore document."""
     if resume_id == "workspace":
         return
 
-    db = get_firestore_client()
-    resume_doc_ref = db.collection("users").document(uid).collection("resumes").document(resume_id)
+    doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
+    headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
 
     update_payload = {
         "score": analysis.ats_score,
@@ -196,4 +297,17 @@ async def persist_analysis_results(
         },
     }
 
-    resume_doc_ref.update(update_payload)
+    fields_body = {"fields": _encode_firestore_fields(update_payload)}
+
+    # Patch with field mask or document update
+    try:
+        # Get existing document to preserve untargeted fields
+        existing = requests.get(doc_url, headers=headers, timeout=10)
+        existing_fields = existing.json().get("fields", {}) if existing.status_code == 200 else {}
+        merged_fields = {**existing_fields, **fields_body["fields"]}
+
+        res = requests.patch(doc_url, headers=headers, json={"fields": merged_fields}, timeout=10)
+        if res.status_code not in (200, 201):
+            print(f"Warning: Firestore patch returned status {res.status_code}: {res.text}")
+    except Exception as e:
+        print(f"Warning: Failed to persist analysis to Firestore: {e}")
