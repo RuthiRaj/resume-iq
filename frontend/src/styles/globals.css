@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --page: #F6F7F9;
+    --surface: #FFFFFF;
+    --border: #E4E7EC;
+    --primary: #101828;
+    --secondary: #667085;
+    --muted: #98A2B3;
+    --accent: #3652D9;
+    --accent-soft: #EEF1FD;
+    --status-success: #12805C;
+    --status-success-soft: #E7F5EF;
+    --status-warning: #B54708;
+    --status-warning-soft: #FFF6ED;
+    --status-error: #B42318;
+    --status-error-soft: #FEF3F2;
+  }
+
+  * {
+    border-color: var(--border);
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: var(--page);
+    color: var(--primary);
+    font-family: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13.5px;
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D0D5DD;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #98A2B3;
+}
+
+/* Print Styles */
+@media print {
+  body {
+    background: white !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}

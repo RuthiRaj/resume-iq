@@ -1,0 +1,21 @@
+from typing import Protocol, Optional
+from app.schemas.candidate import CandidateEvidence
+from app.schemas.analyze import AnalyzeResponse
+
+
+class AiAnalyzerProvider(Protocol):
+    """Provider-agnostic interface for ATS resume analysis."""
+
+    @property
+    def name(self) -> str:
+        ...
+
+    async def analyze(
+        self,
+        target_role: str,
+        target_company: Optional[str],
+        job_description: str,
+        job_description_hash: str,
+        candidate_evidence: CandidateEvidence,
+    ) -> AnalyzeResponse:
+        ...
