@@ -1,11 +1,14 @@
 import pytest
 from app.ai.skills import (
     normalize_skill_name,
+    normalize_skill_category,
+    normalize_and_deduplicate_skill_requirements,
     deduplicate_and_normalize_matching_skills,
     deduplicate_and_normalize_missing_skills,
     deduplicate_and_normalize_partial_skills,
 )
 from app.schemas.common import SkillMatchItem, SkillMissingItem, SkillPartialItem
+from app.schemas.job_description import SkillRequirement
 
 
 def test_normalize_skill_name_common_variants():
@@ -32,6 +35,60 @@ def test_normalize_skill_name_distinct_technologies_preserved():
     assert normalize_skill_name("C++") == "C++"
     assert normalize_skill_name("AWS") == "AWS"
     assert normalize_skill_name("Azure") == "Microsoft Azure"
+
+
+def test_normalize_skill_category_canonical_taxonomy():
+    # Verify architectural concepts are classified as Domain (NEVER SoftSkill)
+    assert normalize_skill_category("System Design", fallback_category="SoftSkill") == "Domain"
+    assert normalize_skill_category("Distributed Systems", fallback_category="SoftSkill") == "Domain"
+    assert normalize_skill_category("Microservices", fallback_category="SoftSkill") == "Domain"
+    assert normalize_skill_category("Observability", fallback_category="SoftSkill") == "Domain"
+
+    # Verify standard tech categories
+    assert normalize_skill_category("Python") == "Language"
+    assert normalize_skill_category("FastAPI") == "Framework"
+    assert normalize_skill_category("PostgreSQL") == "Database"
+    assert normalize_skill_category("Redis") == "Database"
+    assert normalize_skill_category("Docker") == "DevOps"
+    assert normalize_skill_category("Kubernetes") == "DevOps"
+    assert normalize_skill_category("AWS") == "Cloud"
+    assert normalize_skill_category("Apache Kafka") == "Tool"
+    assert normalize_skill_category("Communication") == "SoftSkill"
+    assert normalize_skill_category("Mentorship") == "SoftSkill"
+
+
+def test_normalize_and_deduplicate_skill_requirements():
+    raw = [
+        SkillRequirement(
+            name="system design",
+            category="SoftSkill",
+            importance="MustHave",
+            source_evidence="Experience with system design",
+        ),
+        SkillRequirement(
+            name="System Design",
+            category="Domain",
+            importance="MustHave",
+            source_evidence="Strong fundamentals in system design, distributed systems, and observability.",
+        ),
+        SkillRequirement(
+            name="redis",
+            category="Tool",
+            importance="Preferred",
+            source_evidence="Experience with Redis caching",
+        ),
+    ]
+    deduped = normalize_and_deduplicate_skill_requirements(raw)
+    assert len(deduped) == 2
+
+    sys_design = next(s for s in deduped if s.name == "System Design")
+    assert sys_design.category == "Domain"
+    # Preserves longer source evidence snippet
+    assert "observability" in sys_design.source_evidence
+
+    redis_item = next(s for s in deduped if s.name == "Redis")
+    assert redis_item.category == "Database"
+    assert redis_item.importance == "Preferred"
 
 
 def test_deduplicate_and_normalize_matching_skills():

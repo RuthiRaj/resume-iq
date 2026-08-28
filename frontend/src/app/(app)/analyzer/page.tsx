@@ -24,7 +24,45 @@ import {
   Loader2,
   Check,
   AlertCircle,
+  Briefcase,
+  Code2,
+  ListChecks,
+  Compass,
 } from "lucide-react";
+
+interface SkillRequirementData {
+  name: string;
+  category?: string;
+  importance?: string;
+  sourceEvidence?: string;
+}
+
+interface JobIntelligenceData {
+  jobInfo?: {
+    roleTitle: string;
+    company?: string;
+    seniorityLevel?: string;
+    employmentType?: string;
+    domain?: string;
+  };
+  mustHaveSkills?: SkillRequirementData[];
+  preferredSkills?: SkillRequirementData[];
+  technicalStack?: string[];
+  responsibilities?: string[];
+  experience?: {
+    minimumYears?: number;
+    requiredLevel?: string;
+    description?: string;
+  };
+  education?: {
+    degreeLevel?: string;
+    fieldOfStudy?: string;
+    isRequired?: boolean;
+  };
+  certifications?: string[];
+  softSkills?: string[];
+  summary?: string;
+}
 
 function AnalyzerContent() {
   const searchParams = useSearchParams();
@@ -57,6 +95,7 @@ function AnalyzerContent() {
   const [missingSkills, setMissingSkills] = useState<Array<{ name: string; priority: string; reason: string }>>([]);
   const [matchingSkills, setMatchingSkills] = useState<Array<{ name: string; context: string }>>([]);
   const [partialSkills, setPartialSkills] = useState<Array<{ name: string; note: string }>>([]);
+  const [jobIntelligence, setJobIntelligence] = useState<JobIntelligenceData | null>(null);
 
   // Automatically restore saved analysis when selecting an analyzed resume
   useEffect(() => {
@@ -78,6 +117,7 @@ function AnalyzerContent() {
           setMatchingSkills(found.analysisResults.matchingSkills || []);
           setMissingSkills(found.analysisResults.missingSkills || []);
           setPartialSkills(found.analysisResults.partialSkills || []);
+          setJobIntelligence(found.analysisResults.jobIntelligence || null);
         }
         setHasAnalyzed(true);
       }
@@ -141,6 +181,7 @@ function AnalyzerContent() {
       setMatchingSkills(data.matchingSkills || []);
       setMissingSkills(data.missingSkills || []);
       setPartialSkills(data.partialSkills || []);
+      setJobIntelligence(data.jobIntelligence || null);
       setHasAnalyzed(true);
 
       // Persist to client store state for reactive UI updates
@@ -155,6 +196,7 @@ function AnalyzerContent() {
             matchingSkills: data.matchingSkills,
             missingSkills: data.missingSkills,
             partialSkills: data.partialSkills,
+            jobIntelligence: data.jobIntelligence,
             metadata: data.metadata,
           },
         });
@@ -183,20 +225,19 @@ function AnalyzerContent() {
     setJobDescription(
       "We are looking for a Senior Full Stack Engineer to join Stripe developer platforms.\n\nRequirements:\n- 3+ years experience with TypeScript, React, Next.js, and Node.js.\n- Strong database fundamentals in PostgreSQL and Prisma.\n- Experience with AWS cloud infrastructure (ECS, Lambda, S3) and Docker.\n- Focus on performance, design system tokens, and API reliability.\n- Familiarity with AI developer tools or vector search is a plus."
     );
-    setErrorMessage(null);
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 max-w-6xl mx-auto pb-16">
       {/* Header */}
       <div>
-        <h1 className="text-h1 font-semibold text-primary">Resume ATS & Relevance Analyzer</h1>
-        <p className="text-small text-secondary mt-0.5">
-          Scan your resumes against target job descriptions using Google AI to identify keyword gaps, semantic density, and ATS readiness.
+        <h1 className="text-h1 font-bold text-primary tracking-tight">AI ATS Match Analyzer</h1>
+        <p className="text-body text-secondary mt-1">
+          Perform deterministic ATS scoring, discover keyword gaps, and extract structured Job Intelligence powered by Groq.
         </p>
       </div>
 
-      {/* Error Alert if API error */}
+      {/* Error Banner */}
       {errorMessage && (
         <div className="flex items-start gap-3 rounded-btn border border-status-error/30 bg-status-error-soft/60 p-4 text-status-error">
           <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
@@ -278,7 +319,7 @@ function AnalyzerContent() {
               {isAnalyzing ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Evaluating ATS Match with Google AI...</span>
+                  <span>Evaluating ATS Match & Extracting Job Intelligence...</span>
                 </>
               ) : (
                 <>
@@ -302,7 +343,7 @@ function AnalyzerContent() {
               <div className="text-body font-semibold text-primary">Ready for ATS Deep Scan</div>
               <p className="text-small text-secondary">
                 Select a resume version or your master profile above, provide the target job requirements, and click{" "}
-                <span className="font-semibold text-primary">Run ATS Deep Scan</span> to evaluate keyword match density and discover missing skills.
+                <span className="font-semibold text-primary">Run ATS Deep Scan</span> to extract structured Job Intelligence and evaluate keyword match density.
               </p>
             </div>
           </CardContent>
@@ -385,6 +426,142 @@ function AnalyzerContent() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Target Job Intelligence Section (Phase 5.1) */}
+          {jobIntelligence && (
+            <Card className="border-accent/20 bg-surface">
+              <CardHeader className="pb-3 border-b border-border/40">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-btn bg-accent-soft text-accent">
+                      <Briefcase className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">
+                        Target Job Intelligence: {jobIntelligence.jobInfo?.roleTitle || jobTitle}
+                      </CardTitle>
+                      <CardDescription>
+                        Structured role criteria and requirements faithfully extracted from the job description
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {jobIntelligence.jobInfo?.seniorityLevel && jobIntelligence.jobInfo.seniorityLevel !== "Unspecified" && (
+                      <Badge variant="accent">{jobIntelligence.jobInfo.seniorityLevel}</Badge>
+                    )}
+                    {jobIntelligence.jobInfo?.domain && (
+                      <Badge variant="outline">{jobIntelligence.jobInfo.domain}</Badge>
+                    )}
+                    {jobIntelligence.jobInfo?.employmentType && (
+                      <Badge variant="outline">{jobIntelligence.jobInfo.employmentType}</Badge>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-5">
+                {/* Role Summary */}
+                {jobIntelligence.summary && (
+                  <p className="text-small text-secondary bg-surface-raised p-3 rounded-btn border border-border/50">
+                    <span className="font-semibold text-primary">Role Summary: </span>
+                    {jobIntelligence.summary}
+                  </p>
+                )}
+
+                {/* Requirements Grid: Must-Have vs. Preferred */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Must-Have Requirements */}
+                  <div className="space-y-2.5 rounded-btn border border-status-error/20 bg-status-error-soft/20 p-3.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-small font-semibold text-primary flex items-center gap-1.5">
+                        <AlertTriangle className="h-4 w-4 text-status-warning" />
+                        Must-Have Qualifications ({jobIntelligence.mustHaveSkills?.length || 0})
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {(!jobIntelligence.mustHaveSkills || jobIntelligence.mustHaveSkills.length === 0) ? (
+                        <div className="text-caption text-secondary py-2">No explicit must-have requirements identified.</div>
+                      ) : (
+                        jobIntelligence.mustHaveSkills.map((s, idx) => (
+                          <div key={`must-${s.name}-${idx}`} className="rounded bg-surface p-2 border border-border/40 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-body font-medium text-primary">{s.name}</span>
+                              {s.category && <span className="text-[11px] text-muted">{s.category}</span>}
+                            </div>
+                            {s.sourceEvidence && (
+                              <div className="text-caption text-secondary italic">
+                                &ldquo;{s.sourceEvidence}&rdquo;
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Preferred Requirements */}
+                  <div className="space-y-2.5 rounded-btn border border-accent/20 bg-accent-soft/20 p-3.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-small font-semibold text-primary flex items-center gap-1.5">
+                        <Sparkles className="h-4 w-4 text-accent" />
+                        Preferred & Bonus Qualifications ({jobIntelligence.preferredSkills?.length || 0})
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {(!jobIntelligence.preferredSkills || jobIntelligence.preferredSkills.length === 0) ? (
+                        <div className="text-caption text-secondary py-2">No explicit bonus requirements identified.</div>
+                      ) : (
+                        jobIntelligence.preferredSkills.map((s, idx) => (
+                          <div key={`pref-${s.name}-${idx}`} className="rounded bg-surface p-2 border border-border/40 space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className="text-body font-medium text-primary">{s.name}</span>
+                              {s.category && <span className="text-[11px] text-muted">{s.category}</span>}
+                            </div>
+                            {s.sourceEvidence && (
+                              <div className="text-caption text-secondary italic">
+                                &ldquo;{s.sourceEvidence}&rdquo;
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Technical Stack Cloud */}
+                {jobIntelligence.technicalStack && jobIntelligence.technicalStack.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-small font-semibold text-primary flex items-center gap-1.5">
+                      <Code2 className="h-4 w-4 text-accent" />
+                      Extracted Technical Stack ({jobIntelligence.technicalStack.length})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {jobIntelligence.technicalStack.map((tech, idx) => (
+                        <Badge key={`tech-${tech}-${idx}`} variant="default" className="text-caption px-2 py-0.5">
+                          {tech}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Core Responsibilities */}
+                {jobIntelligence.responsibilities && jobIntelligence.responsibilities.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-small font-semibold text-primary flex items-center gap-1.5">
+                      <ListChecks className="h-4 w-4 text-status-success" />
+                      Key Responsibilities
+                    </span>
+                    <ul className="space-y-1 text-small text-secondary pl-5 list-disc">
+                      {jobIntelligence.responsibilities.map((resp, idx) => (
+                        <li key={`resp-${idx}`}>{resp}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Skill Matching Matrix */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

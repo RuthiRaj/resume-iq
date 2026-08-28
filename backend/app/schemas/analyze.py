@@ -7,6 +7,7 @@ from app.schemas.common import (
     SkillPartialItem,
     AnalysisMetadata,
 )
+from app.schemas.job_description import StructuredJobDescription
 
 
 class AnalyzeRequest(BaseModel):
@@ -31,6 +32,9 @@ class AnalyzeResponse(BaseModel):
     matching_skills: List[SkillMatchItem] = Field(default_factory=list, alias="matchingSkills")
     missing_skills: List[SkillMissingItem] = Field(default_factory=list, alias="missingSkills")
     partial_skills: List[SkillPartialItem] = Field(default_factory=list, alias="partialSkills")
+    job_intelligence: Optional[StructuredJobDescription] = Field(
+        default=None, alias="jobIntelligence"
+    )
     metadata: AnalysisMetadata
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)

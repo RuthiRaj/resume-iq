@@ -35,6 +35,7 @@ export interface AnalysisResultData {
   matchingSkills: Array<{ name: string; context: string }>;
   missingSkills: Array<{ name: string; priority: "High" | "Medium" | "Low"; reason: string }>;
   partialSkills: Array<{ name: string; note: string }>;
+  jobIntelligence?: any;
   metadata?: {
     provider: string;
     model: string;
