@@ -15,8 +15,9 @@ class Settings(BaseSettings):
     FIREBASE_CREDENTIALS_PATH: str = ""
 
     # AI Analyzer Settings (Server-Side Only)
-    AI_ANALYZER_PROVIDER: str = "gemini"
-    AI_ANALYZER_MODEL: str = "gemini-3.6-flash"
+    AI_ANALYZER_PROVIDER: str = "groq"
+    AI_ANALYZER_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
 
     model_config = SettingsConfigDict(
