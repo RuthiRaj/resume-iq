@@ -8,6 +8,7 @@ from app.schemas.common import (
     AnalysisMetadata,
 )
 from app.schemas.job_description import StructuredJobDescription
+from app.schemas.requirement_match import RequirementMatch
 
 
 class AnalyzeRequest(BaseModel):
@@ -34,6 +35,9 @@ class AnalyzeResponse(BaseModel):
     partial_skills: List[SkillPartialItem] = Field(default_factory=list, alias="partialSkills")
     job_intelligence: Optional[StructuredJobDescription] = Field(
         default=None, alias="jobIntelligence"
+    )
+    requirement_matches: List[RequirementMatch] = Field(
+        default_factory=list, alias="requirementMatches"
     )
     metadata: AnalysisMetadata
 

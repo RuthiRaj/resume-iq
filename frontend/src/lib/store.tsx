@@ -30,12 +30,36 @@ import {
 
 export type { ResumeSnapshot };
 
+export interface EvidenceDimensionsData {
+  relevantContext: boolean;
+  productionContext: boolean;
+  quantifiableImpact: boolean;
+  meetsExperienceYears: boolean;
+  explicitTechnology: boolean;
+}
+
+export interface RequirementMatchData {
+  requirementName: string;
+  category: string;
+  importance: "MustHave" | "Preferred" | "Unspecified";
+  matchStatus: "StrongMatch" | "PartialMatch" | "Missing";
+  resumeEvidence?: string;
+  jobSourceEvidence?: string;
+  evidenceSourceSection?: "Experience" | "Project" | "SkillTag" | "Education" | "Certification" | "Summary" | "None";
+  evidenceDimensions?: EvidenceDimensionsData;
+  matchReason?: string;
+  gapReason?: string;
+  gapType?: string;
+  confidence: "High" | "Medium" | "Low";
+}
+
 export interface AnalysisResultData {
   summaryFeedback: string;
   matchingSkills: Array<{ name: string; context: string }>;
   missingSkills: Array<{ name: string; priority: "High" | "Medium" | "Low"; reason: string }>;
   partialSkills: Array<{ name: string; note: string }>;
   jobIntelligence?: any;
+  requirementMatches?: RequirementMatchData[];
   metadata?: {
     provider: string;
     model: string;

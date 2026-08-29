@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { useCareer } from "@/lib/store";
+import { useCareer, RequirementMatchData } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -96,6 +96,7 @@ function AnalyzerContent() {
   const [matchingSkills, setMatchingSkills] = useState<Array<{ name: string; context: string }>>([]);
   const [partialSkills, setPartialSkills] = useState<Array<{ name: string; note: string }>>([]);
   const [jobIntelligence, setJobIntelligence] = useState<JobIntelligenceData | null>(null);
+  const [requirementMatches, setRequirementMatches] = useState<RequirementMatchData[]>([]);
 
   // Automatically restore saved analysis when selecting an analyzed resume
   useEffect(() => {
@@ -118,6 +119,7 @@ function AnalyzerContent() {
           setMissingSkills(found.analysisResults.missingSkills || []);
           setPartialSkills(found.analysisResults.partialSkills || []);
           setJobIntelligence(found.analysisResults.jobIntelligence || null);
+          setRequirementMatches(found.analysisResults.requirementMatches || []);
         }
         setHasAnalyzed(true);
       }
@@ -182,6 +184,7 @@ function AnalyzerContent() {
       setMissingSkills(data.missingSkills || []);
       setPartialSkills(data.partialSkills || []);
       setJobIntelligence(data.jobIntelligence || null);
+      setRequirementMatches(data.requirementMatches || []);
       setHasAnalyzed(true);
 
       // Persist to client store state for reactive UI updates
@@ -197,6 +200,7 @@ function AnalyzerContent() {
             missingSkills: data.missingSkills,
             partialSkills: data.partialSkills,
             jobIntelligence: data.jobIntelligence,
+            requirementMatches: data.requirementMatches,
             metadata: data.metadata,
           },
         });
@@ -233,7 +237,7 @@ function AnalyzerContent() {
       <div>
         <h1 className="text-h1 font-bold text-primary tracking-tight">AI ATS Match Analyzer</h1>
         <p className="text-body text-secondary mt-1">
-          Perform deterministic ATS scoring, discover keyword gaps, and extract structured Job Intelligence powered by Groq.
+          Perform deterministic ATS scoring, discover keyword gaps, extract structured Job Intelligence, and verify Requirement Evidence Matching powered by Groq.
         </p>
       </div>
 
@@ -319,7 +323,7 @@ function AnalyzerContent() {
               {isAnalyzing ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  <span>Evaluating ATS Match & Extracting Job Intelligence...</span>
+                  <span>Evaluating ATS Match & Requirement Evidence...</span>
                 </>
               ) : (
                 <>
@@ -343,7 +347,7 @@ function AnalyzerContent() {
               <div className="text-body font-semibold text-primary">Ready for ATS Deep Scan</div>
               <p className="text-small text-secondary">
                 Select a resume version or your master profile above, provide the target job requirements, and click{" "}
-                <span className="font-semibold text-primary">Run ATS Deep Scan</span> to extract structured Job Intelligence and evaluate keyword match density.
+                <span className="font-semibold text-primary">Run ATS Deep Scan</span> to extract structured Job Intelligence, verify Requirement Evidence Matching, and evaluate keyword match density.
               </p>
             </div>
           </CardContent>
@@ -426,6 +430,156 @@ function AnalyzerContent() {
               </CardContent>
             </Card>
           </div>
+
+          {/* Requirement Evidence Matching Matrix (Phase 5.2.1) */}
+          {requirementMatches && requirementMatches.length > 0 && (
+            <Card className="border-accent/20 bg-surface">
+              <CardHeader className="pb-3 border-b border-border/40">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-btn bg-accent-soft text-accent">
+                      <CheckCircle2 className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">
+                        Requirement Evidence Matching
+                      </CardTitle>
+                      <CardDescription>
+                        Fine-grained evidence mapping comparing verified candidate experience against target job requirements
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 text-caption">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="h-2 w-2 rounded-full bg-status-success inline-block"></span>
+                      Strong ({requirementMatches.filter((m) => m.matchStatus === "StrongMatch").length})
+                    </span>
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="h-2 w-2 rounded-full bg-status-warning inline-block"></span>
+                      Partial ({requirementMatches.filter((m) => m.matchStatus === "PartialMatch").length})
+                    </span>
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <span className="h-2 w-2 rounded-full bg-status-error inline-block"></span>
+                      Missing ({requirementMatches.filter((m) => m.matchStatus === "Missing").length})
+                    </span>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-3">
+                {requirementMatches.map((match, idx) => (
+                  <div
+                    key={`rm-${match.requirementName}-${idx}`}
+                    className={`rounded-btn border p-4 space-y-3 transition-all ${
+                      match.matchStatus === "StrongMatch"
+                        ? "border-status-success/30 bg-status-success-soft/20"
+                        : match.matchStatus === "PartialMatch"
+                        ? "border-status-warning/30 bg-status-warning-soft/20"
+                        : "border-status-error/30 bg-status-error-soft/20"
+                    }`}
+                  >
+                    {/* Header Row */}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-body font-semibold text-primary">{match.requirementName}</span>
+                        <Badge
+                          variant={match.importance === "MustHave" ? "warning" : "outline"}
+                          className="text-[10px] px-1.5 py-0"
+                        >
+                          {match.importance === "MustHave" ? "Must-Have" : "Preferred"}
+                        </Badge>
+                        {match.category && (
+                          <span className="text-[11px] text-muted font-medium bg-surface px-2 py-0.5 rounded border border-border/40">
+                            {match.category}
+                          </span>
+                        )}
+                        {match.evidenceSourceSection && match.evidenceSourceSection !== "None" && (
+                          <span className="text-[11px] font-medium bg-accent-soft text-accent px-2 py-0.5 rounded border border-accent/30">
+                            {match.evidenceSourceSection === "Experience" ? "Work Experience" : match.evidenceSourceSection === "SkillTag" ? "Skill List" : match.evidenceSourceSection}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge
+                          variant={
+                            match.matchStatus === "StrongMatch"
+                              ? "success"
+                              : match.matchStatus === "PartialMatch"
+                              ? "accent"
+                              : "default"
+                          }
+                          className="text-caption font-semibold"
+                        >
+                          {match.matchStatus === "StrongMatch"
+                            ? "Strong Match"
+                            : match.matchStatus === "PartialMatch"
+                            ? "Partial Match"
+                            : "Missing"}
+                        </Badge>
+                        <span className="text-[11px] text-secondary">
+                          Confidence: <span className="font-medium text-primary">{match.confidence}</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Match Rationale ("Why?") */}
+                    {match.matchReason && (
+                      <div className="text-small text-secondary bg-surface/80 p-2.5 rounded border border-border/40">
+                        <span className="font-semibold text-primary">Why? </span>
+                        {match.matchReason}
+                      </div>
+                    )}
+
+                    {/* Gap Explanation (when Partial or Missing) */}
+                    {match.matchStatus !== "StrongMatch" && match.gapReason && (
+                      <div className="text-small text-status-warning bg-status-warning-soft/40 p-2.5 rounded border border-status-warning/30 flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-status-warning" />
+                        <div>
+                          <span className="font-semibold text-primary">Gap: </span>
+                          <span>{match.gapReason}</span>
+                          {match.gapType && match.gapType !== "None" && (
+                            <span className="ml-2 text-[10px] uppercase font-bold text-muted bg-surface px-1.5 py-0.5 rounded border border-border">
+                              {match.gapType}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Evidence Grid: JD Quote vs Candidate Resume Evidence */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-caption pt-1">
+                      {/* Job Requirement Source Snippet */}
+                      <div className="rounded bg-surface p-2.5 border border-border/50 space-y-1">
+                        <div className="font-medium text-primary text-[11px] uppercase tracking-wide text-muted">
+                          Job Description Requirement
+                        </div>
+                        <div className="text-secondary italic">
+                          {match.jobSourceEvidence
+                            ? `"${match.jobSourceEvidence}"`
+                            : "Explicit requirement specified in job description."}
+                        </div>
+                      </div>
+
+                      {/* Candidate Resume Grounded Evidence */}
+                      <div className="rounded bg-surface p-2.5 border border-border/50 space-y-1">
+                        <div className="font-medium text-primary text-[11px] uppercase tracking-wide text-muted">
+                          Candidate Resume Evidence
+                        </div>
+                        {match.resumeEvidence ? (
+                          <div className="text-primary font-medium">
+                            &ldquo;{match.resumeEvidence}&rdquo;
+                          </div>
+                        ) : (
+                          <div className="text-status-error italic">
+                            No supporting candidate evidence detected in resume snapshot.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Target Job Intelligence Section (Phase 5.1) */}
           {jobIntelligence && (
