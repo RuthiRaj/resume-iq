@@ -53,6 +53,40 @@ export interface RequirementMatchData {
   confidence: "High" | "Medium" | "Low";
 }
 
+export interface UnsupportedClaimData {
+  category: string;
+  claimText: string;
+  reason: string;
+  promptForUser: string;
+}
+
+export interface ValidationResultData {
+  isValid: boolean;
+  status: "Draft" | "Validated" | "RequiresCandidateInput" | "UserEdited" | "UserApproved" | "Applied" | "ReAnalyzed";
+  unsupportedClaims?: UnsupportedClaimData[];
+  sanitizedBullet?: string;
+}
+
+export interface RemediationSuggestionData {
+  id: string;
+  requirementName: string;
+  importance: "MustHave" | "Preferred" | "Unspecified";
+  gapType: string;
+  eligibility: "Remediable" | "RequiresCandidateFacts" | "PartiallyRemediable" | "NotRemediable";
+  actionType: "ImproveExistingBullet" | "PromptForMissingFacts" | "AddProjectContext" | "ClarifyAdjacentTechnology" | "ExplainHardGap" | "None";
+  targetSection: "Experience" | "Project" | "SkillTag" | "Education" | "Certification" | "Summary" | "None";
+  sourceEvidenceId: string;
+  originalEvidence?: string;
+  targetExperienceId?: string;
+  targetBulletIndex?: number;
+  suggestedBullet?: string;
+  missingFactPrompt?: string;
+  guidance: string;
+  potentialImpact: "High" | "Medium" | "Low";
+  status: "Draft" | "Validated" | "RequiresCandidateInput" | "UserEdited" | "UserApproved" | "Applied" | "ReAnalyzed";
+  validation?: ValidationResultData;
+}
+
 export interface AnalysisResultData {
   summaryFeedback: string;
   matchingSkills: Array<{ name: string; context: string }>;
@@ -60,6 +94,7 @@ export interface AnalysisResultData {
   partialSkills: Array<{ name: string; note: string }>;
   jobIntelligence?: any;
   requirementMatches?: RequirementMatchData[];
+  remediationSuggestions?: RemediationSuggestionData[];
   metadata?: {
     provider: string;
     model: string;

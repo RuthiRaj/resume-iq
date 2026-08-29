@@ -9,6 +9,7 @@ from app.schemas.common import (
 )
 from app.schemas.job_description import StructuredJobDescription
 from app.schemas.requirement_match import RequirementMatch
+from app.schemas.remediation import RemediationSuggestion
 
 
 class AnalyzeRequest(BaseModel):
@@ -38,6 +39,9 @@ class AnalyzeResponse(BaseModel):
     )
     requirement_matches: List[RequirementMatch] = Field(
         default_factory=list, alias="requirementMatches"
+    )
+    remediation_suggestions: List[RemediationSuggestion] = Field(
+        default_factory=list, alias="remediationSuggestions"
     )
     metadata: AnalysisMetadata
 

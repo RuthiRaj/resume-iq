@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict
 from fastapi import HTTPException, status
 from groq import AsyncGroq
 from app.core.config import settings
@@ -21,6 +21,7 @@ from app.schemas.job_description import (
     SkillRequirement,
 )
 from app.schemas.requirement_match import RequirementMatch
+from app.schemas.remediation import RemediationSuggestion
 from app.ai.scoring import calculate_deterministic_ats_score
 from app.ai.skills import (
     normalize_skill_name,
@@ -30,6 +31,7 @@ from app.ai.skills import (
     deduplicate_and_normalize_partial_skills,
 )
 from app.ai.grounding import reconcile_requirement_coverage
+from app.ai.remediation_engine import generate_remediation_suggestions
 
 SYSTEM_INSTRUCTION = """You are a Senior Principal Technical Recruiter and ATS (Applicant Tracking System) Intelligence Engine.
 Your task is to analyze candidate resume evidence against a target Job Description in a SINGLE comprehensive pass:
@@ -62,7 +64,7 @@ JOB DESCRIPTION INTELLIGENCE RULES:
 5. Technical Stack: List all distinct technologies, languages, frameworks, platforms, and tools explicitly mentioned in the JD text. Do NOT hallucinate technologies not mentioned.
 6. Responsibilities: Extract 3-6 concise, faithful core responsibilities stated in the JD.
 
-EXPLAINABLE REQUIREMENT EVIDENCE MATCHING RULES:
+EXPLAINABLE REQUIREMENT EVIDENCE MATCHING & REMEDIATION RULES:
 For EVERY Must-Have and Preferred skill requirement, evaluate the candidate's actual resume evidence:
 1. StrongMatch: The candidate resume contains clear, verifiable evidence demonstrating production experience with the requirement.
 2. PartialMatch: The candidate resume contains related, adjacent, or foundational evidence, but lacks full demonstration of the requirement (e.g., skill listed without project context, adjacent technology, or unquantified scope).
@@ -74,6 +76,7 @@ For EVERY Must-Have and Preferred skill requirement, evaluate the candidate's ac
 - gapType: "None" | "MissingEvidence" | "InsufficientContext" | "MissingProductionExperience" | "InsufficientExperienceYears" | "MissingQuantification" | "AdjacentTechnology" | "MissingSeniority" | "MissingProjectEvidence" | "MissingCertification".
 - evidenceDimensions: Object with { "relevantContext": bool, "productionContext": bool, "quantifiableImpact": bool, "meetsExperienceYears": bool, "explicitTechnology": bool }.
 - confidence: "High", "Medium", or "Low" based on evidence clarity.
+- suggestedBullet: If PartialMatch and existing candidate bullet exists, propose a grounded structural rewrite that enhances action verbs and clarity without inventing ungrounded metrics or phantom skills. If Missing, set to "".
 
 ATS EVALUATION & SCORING RULES:
 1. Relevance (0-100): Measure domain alignment, seniority match, and core tech stack overlap.
@@ -144,6 +147,7 @@ Return a single JSON object matching this exact structure:
         "meetsExperienceYears": <boolean>,
         "explicitTechnology": <boolean>
       },
+      "suggestedBullet": "<Grounded bullet rewrite or empty string>",
       "confidence": "High" | "Medium" | "Low"
     }
   ],
@@ -188,13 +192,11 @@ class GroqAnalyzerProvider:
 
         model_name = settings.AI_ANALYZER_MODEL or "openai/gpt-oss-120b"
 
-        # Explicit 60-second timeout configuration
         client = AsyncGroq(
             api_key=api_key,
             timeout=60.0,
         )
 
-        # Compact JSON serialization of candidate evidence to optimize token usage
         compact_evidence_json = json.dumps(
             candidate_evidence.model_dump(by_alias=True),
             separators=(",", ":"),
@@ -210,7 +212,7 @@ class GroqAnalyzerProvider:
             f"1. 'scoreBreakdown': {{'relevance': integer 0-100, 'keywords': integer 0-100, 'metrics': integer 0-100, 'formatting': integer 0-100}}\n"
             f"2. 'summaryFeedback': 2-3 sentence overview\n"
             f"3. 'jobIntelligence': structured role criteria and required skills\n"
-            f"4. 'requirementMatches': explainable requirement-level evidence matching array with matchReason, gapReason, gapType, evidenceDimensions\n"
+            f"4. 'requirementMatches': explainable requirement-level evidence matching array with matchReason, gapReason, gapType, evidenceDimensions, suggestedBullet\n"
             f"5. 'matchingSkills', 'missingSkills', 'partialSkills' arrays."
         )
 
@@ -378,11 +380,16 @@ class GroqAnalyzerProvider:
         # 4. Parse, Ground and Deterministically Reconcile Requirement Matches
         raw_matches_list = parsed.get("requirementMatches", [])
         parsed_matches: List[RequirementMatch] = []
+        proposed_rewrites_by_name: Dict[str, str] = {}
+
         if isinstance(raw_matches_list, list):
             for rm in raw_matches_list:
                 if isinstance(rm, dict) and rm.get("requirementName"):
                     try:
                         parsed_matches.append(RequirementMatch.model_validate(rm))
+                        if rm.get("suggestedBullet"):
+                            norm_k = normalize_skill_name(rm["requirementName"])
+                            proposed_rewrites_by_name[norm_k] = rm["suggestedBullet"]
                     except Exception:
                         continue
 
@@ -391,6 +398,13 @@ class GroqAnalyzerProvider:
             matches=parsed_matches,
             job_description=job_description,
             candidate_evidence=candidate_evidence,
+        )
+
+        # 5. Deterministic Remediation Engine with Claim-Preservation Validation (Phase 5.3)
+        remediation_suggestions = generate_remediation_suggestions(
+            matches=grounded_requirement_matches,
+            candidate_evidence=candidate_evidence,
+            proposed_rewrites_by_name=proposed_rewrites_by_name,
         )
 
         metadata = AnalysisMetadata(
@@ -416,5 +430,6 @@ class GroqAnalyzerProvider:
             partial_skills=normalized_partial,
             job_intelligence=structured_job_intelligence,
             requirement_matches=grounded_requirement_matches,
+            remediation_suggestions=remediation_suggestions,
             metadata=metadata,
         )

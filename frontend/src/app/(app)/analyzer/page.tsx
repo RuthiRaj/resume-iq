@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { useCareer, RequirementMatchData } from "@/lib/store";
+import { useCareer, RequirementMatchData, RemediationSuggestionData } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,10 @@ import {
   Code2,
   ListChecks,
   Compass,
+  Wand2,
+  Send,
+  RefreshCw,
+  PlusCircle,
 } from "lucide-react";
 
 interface SkillRequirementData {
@@ -86,6 +90,8 @@ function AnalyzerContent() {
 
   // Analysis Metrics
   const [overallScore, setOverallScore] = useState(0);
+  const [previousScore, setPreviousScore] = useState<number | null>(null);
+  const [atsDelta, setAtsDelta] = useState<number | null>(null);
   const [relevanceScore, setRelevanceScore] = useState(0);
   const [keywordScore, setKeywordScore] = useState(0);
   const [impactScore, setImpactScore] = useState(0);
@@ -97,6 +103,15 @@ function AnalyzerContent() {
   const [partialSkills, setPartialSkills] = useState<Array<{ name: string; note: string }>>([]);
   const [jobIntelligence, setJobIntelligence] = useState<JobIntelligenceData | null>(null);
   const [requirementMatches, setRequirementMatches] = useState<RequirementMatchData[]>([]);
+  const [remediationSuggestions, setRemediationSuggestions] = useState<RemediationSuggestionData[]>([]);
+
+  // Interactive Remediation State
+  const [candidateFacts, setCandidateFacts] = useState<Record<string, string>>({});
+  const [editingBullets, setEditingBullets] = useState<Record<string, string>>({});
+  const [appliedRemediations, setAppliedRemediations] = useState<Record<string, boolean>>({});
+  const [synthesizingId, setSynthesizingId] = useState<string | null>(null);
+  const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [targetedResumeId, setTargetedResumeId] = useState<string | null>(null);
 
   // Automatically restore saved analysis when selecting an analyzed resume
   useEffect(() => {
@@ -120,6 +135,7 @@ function AnalyzerContent() {
           setPartialSkills(found.analysisResults.partialSkills || []);
           setJobIntelligence(found.analysisResults.jobIntelligence || null);
           setRequirementMatches(found.analysisResults.requirementMatches || []);
+          setRemediationSuggestions(found.analysisResults.remediationSuggestions || []);
         }
         setHasAnalyzed(true);
       }
@@ -185,7 +201,17 @@ function AnalyzerContent() {
       setPartialSkills(data.partialSkills || []);
       setJobIntelligence(data.jobIntelligence || null);
       setRequirementMatches(data.requirementMatches || []);
+      setRemediationSuggestions(data.remediationSuggestions || []);
       setHasAnalyzed(true);
+
+      // Initialize editing bullets map
+      if (data.remediationSuggestions) {
+        const editMap: Record<string, string> = {};
+        data.remediationSuggestions.forEach((sug: RemediationSuggestionData) => {
+          if (sug.suggestedBullet) editMap[sug.id] = sug.suggestedBullet;
+        });
+        setEditingBullets((prev) => ({ ...prev, ...editMap }));
+      }
 
       // Persist to client store state for reactive UI updates
       if (selectedResumeId && selectedResumeId !== "workspace") {
@@ -201,12 +227,160 @@ function AnalyzerContent() {
             partialSkills: data.partialSkills,
             jobIntelligence: data.jobIntelligence,
             requirementMatches: data.requirementMatches,
+            remediationSuggestions: data.remediationSuggestions,
             metadata: data.metadata,
           },
         });
       }
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to analyze resume. Please try again.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const handleSynthesizeBullet = async (sug: RemediationSuggestionData) => {
+    if (!user) return;
+    const factText = candidateFacts[sug.id]?.trim();
+    if (!factText || factText.length < 5) {
+      setErrorMessage("Please enter at least a few words describing your real-world experience.");
+      return;
+    }
+
+    setSynthesizingId(sug.id);
+    setErrorMessage(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/ai/remediate/synthesize-bullet", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          requirementName: sug.requirementName,
+          candidateFact: factText,
+          targetRole: jobTitle,
+          jobContext: jobDescription.substring(0, 300),
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to synthesize bullet.");
+      }
+
+      setEditingBullets((prev) => ({ ...prev, [sug.id]: data.synthesizedBullet }));
+      // Update local suggestion validation report
+      setRemediationSuggestions((prev) =>
+        prev.map((item) =>
+          item.id === sug.id
+            ? { ...item, suggestedBullet: data.synthesizedBullet, validation: data.validation, status: data.status }
+            : item
+        )
+      );
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to synthesize bullet from facts.");
+    } finally {
+      setSynthesizingId(null);
+    }
+  };
+
+  const handleApplyRemediation = async (sug: RemediationSuggestionData) => {
+    if (!user) return;
+    const approvedBullet = editingBullets[sug.id]?.trim() || sug.suggestedBullet?.trim();
+    if (!approvedBullet) {
+      setErrorMessage("Cannot apply an empty bullet.");
+      return;
+    }
+
+    setApplyingId(sug.id);
+    setErrorMessage(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/ai/remediate/apply", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          resumeId: targetedResumeId || selectedResumeId,
+          remediationId: sug.id,
+          sourceEvidenceId: sug.sourceEvidenceId,
+          targetSection: sug.targetSection || "Experience",
+          targetExperienceId: sug.targetExperienceId,
+          targetBulletIndex: sug.targetBulletIndex,
+          approvedBullet: approvedBullet,
+          targetRole: jobTitle,
+          targetCompany: jobCompany,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to apply remediation.");
+      }
+
+      setAppliedRemediations((prev) => ({ ...prev, [sug.id]: true }));
+      if (data.targetedResumeId) {
+        setTargetedResumeId(data.targetedResumeId);
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to apply remediation to targeted resume.");
+    } finally {
+      setApplyingId(null);
+    }
+  };
+
+  const handleReAnalyzeTargetFit = async () => {
+    if (!user) return;
+    setPreviousScore(overallScore);
+    const resumeToAnalyze = targetedResumeId || selectedResumeId;
+
+    setIsAnalyzing(true);
+    setErrorMessage(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const response = await fetch("/api/ai/analyze", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          resumeId: resumeToAnalyze,
+          targetRole: jobTitle.trim(),
+          targetCompany: jobCompany.trim(),
+          jobDescription: jobDescription.trim(),
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Re-analysis failed.");
+
+      const newScore = data.atsScore;
+      setAtsDelta(newScore - overallScore);
+      setOverallScore(newScore);
+
+      if (data.scoreBreakdown) {
+        setRelevanceScore(data.scoreBreakdown.relevance);
+        setKeywordScore(data.scoreBreakdown.keywords);
+        setImpactScore(data.scoreBreakdown.metrics);
+        setFormatScore(data.scoreBreakdown.formatting);
+      }
+      setSummaryFeedback(data.summaryFeedback || "");
+      setMatchingSkills(data.matchingSkills || []);
+      setMissingSkills(data.missingSkills || []);
+      setPartialSkills(data.partialSkills || []);
+      setJobIntelligence(data.jobIntelligence || null);
+      setRequirementMatches(data.requirementMatches || []);
+      setRemediationSuggestions(data.remediationSuggestions || []);
+    } catch (err: any) {
+      setErrorMessage(err.message || "Failed to re-analyze targeted resume fit.");
     } finally {
       setIsAnalyzing(false);
     }
@@ -577,6 +751,257 @@ function AnalyzerContent() {
                     </div>
                   </div>
                 ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Evidence-Grounded Gap Remediation Section (Phase 5.3) */}
+          {remediationSuggestions && remediationSuggestions.length > 0 && (
+            <Card className="border-accent/30 bg-surface shadow-sm">
+              <CardHeader className="pb-3 border-b border-border/40">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-btn bg-accent-soft text-accent">
+                      <Wand2 className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-base font-semibold">
+                        Targeted Gap Remediation Engine
+                      </CardTitle>
+                      <CardDescription>
+                        Truthful, evidence-grounded action plan to resolve requirement gaps without fabricating claims
+                      </CardDescription>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {atsDelta !== null && (
+                      <Badge variant="success" className="text-caption font-semibold px-2.5 py-1">
+                        ATS Delta: +{atsDelta} pts ({previousScore}% → {overallScore}%)
+                      </Badge>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleReAnalyzeTargetFit}
+                      disabled={isAnalyzing}
+                      className="text-caption gap-1.5 h-8"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isAnalyzing ? "animate-spin" : ""}`} />
+                      Re-Analyze Target Fit
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-4 space-y-4">
+                {remediationSuggestions.map((sug) => {
+                  const isApplied = appliedRemediations[sug.id];
+                  const currentEditBullet = editingBullets[sug.id] !== undefined ? editingBullets[sug.id] : (sug.suggestedBullet || "");
+                  const isSynthesizing = synthesizingId === sug.id;
+                  const isApplying = applyingId === sug.id;
+
+                  return (
+                    <div
+                      key={sug.id}
+                      className={`rounded-btn border p-4 space-y-3 transition-all ${
+                        isApplied
+                          ? "border-status-success/40 bg-status-success-soft/20"
+                          : sug.eligibility === "NotRemediable"
+                          ? "border-border/60 bg-surface-raised/40"
+                          : "border-border/60 bg-surface"
+                      }`}
+                    >
+                      {/* Remediation Header */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-body font-semibold text-primary">{sug.requirementName}</span>
+                          <Badge
+                            variant={sug.importance === "MustHave" ? "warning" : "outline"}
+                            className="text-[10px] px-1.5 py-0"
+                          >
+                            {sug.importance === "MustHave" ? "Must-Have" : "Preferred"}
+                          </Badge>
+                          <Badge
+                            variant={
+                              sug.eligibility === "Remediable"
+                                ? "accent"
+                                : sug.eligibility === "RequiresCandidateFacts"
+                                ? "warning"
+                                : "outline"
+                            }
+                            className="text-[10px] px-1.5 py-0"
+                          >
+                            {sug.eligibility === "Remediable"
+                              ? "Grounded Rewrite"
+                              : sug.eligibility === "RequiresCandidateFacts"
+                              ? "Supply Missing Facts"
+                              : sug.eligibility === "PartiallyRemediable"
+                              ? "Adjacent Tech"
+                              : "Hard Experience Gap"}
+                          </Badge>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-medium text-secondary">
+                            Impact:{" "}
+                            <span
+                              className={`font-semibold ${
+                                sug.potentialImpact === "High"
+                                  ? "text-accent"
+                                  : sug.potentialImpact === "Medium"
+                                  ? "text-primary"
+                                  : "text-muted"
+                              }`}
+                            >
+                              {sug.potentialImpact} Potential
+                            </span>
+                          </span>
+                          {isApplied && (
+                            <Badge variant="success" className="text-[10px] gap-1">
+                              <Check className="h-3 w-3" /> Applied to Targeted Resume
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Strategy Guidance */}
+                      <div className="text-small text-secondary bg-surface-raised p-2.5 rounded border border-border/40">
+                        <span className="font-semibold text-primary">Remediation Strategy: </span>
+                        {sug.guidance}
+                      </div>
+
+                      {/* Case 1: ImproveExistingBullet (Grounded Rewrite) */}
+                      {sug.actionType === "ImproveExistingBullet" || sug.actionType === "ClarifyAdjacentTechnology" ? (
+                        <div className="space-y-3 pt-1">
+                          {sug.originalEvidence && (
+                            <div className="text-caption text-muted bg-surface/60 p-2 rounded border border-border/30">
+                              <span className="font-semibold text-primary">Original Resume Evidence: </span>
+                              <span className="italic">&ldquo;{sug.originalEvidence}&rdquo;</span>
+                            </div>
+                          )}
+
+                          <div className="space-y-1.5">
+                            <label className="text-caption font-semibold text-primary">
+                              Improved Bullet (Editable):
+                            </label>
+                            <Textarea
+                              value={currentEditBullet}
+                              onChange={(e) => setEditingBullets((prev) => ({ ...prev, [sug.id]: e.target.value }))}
+                              rows={2}
+                              className="text-small bg-surface focus-visible:ring-accent"
+                              disabled={isApplied}
+                              placeholder="Review or edit the improved bullet..."
+                            />
+                          </div>
+
+                          {/* Claim Validation Warnings if any */}
+                          {sug.validation?.unsupportedClaims && sug.validation.unsupportedClaims.length > 0 && (
+                            <div className="rounded bg-status-warning-soft/30 p-2.5 border border-status-warning/40 text-caption text-status-warning space-y-1">
+                              <div className="font-semibold flex items-center gap-1.5">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                Claim-Preservation Warning:
+                              </div>
+                              {sug.validation.unsupportedClaims.map((uc, i) => (
+                                <div key={i} className="text-[11px]">
+                                  • {uc.reason} <span className="text-primary font-medium">({uc.promptForUser})</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex justify-end pt-1">
+                            <Button
+                              size="sm"
+                              variant={isApplied ? "outline" : "primary"}
+                              disabled={isApplied || isApplying || !currentEditBullet.trim()}
+                              onClick={() => handleApplyRemediation(sug)}
+                              className="text-caption gap-1.5"
+                            >
+                              {isApplying ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : isApplied ? (
+                                <Check className="h-3.5 w-3.5 text-status-success" />
+                              ) : (
+                                <PlusCircle className="h-3.5 w-3.5" />
+                              )}
+                              {isApplied ? "Applied to Targeted Resume" : "Apply to Targeted Resume"}
+                            </Button>
+                          </div>
+                        </div>
+                      ) : sug.actionType === "PromptForMissingFacts" || sug.actionType === "AddProjectContext" ? (
+                        /* Case 2: Candidate Fact Prompt & Synthesis */
+                        <div className="space-y-3 pt-1">
+                          <div className="rounded bg-accent-soft/40 p-3 border border-accent/30 space-y-2">
+                            <div className="text-small font-semibold text-primary flex items-center gap-1.5">
+                              <Sparkles className="h-4 w-4 text-accent" />
+                              {sug.missingFactPrompt || `Did you work with ${sug.requirementName}? Describe your real-world experience below:`}
+                            </div>
+                            <Textarea
+                              value={candidateFacts[sug.id] || ""}
+                              onChange={(e) => setCandidateFacts((prev) => ({ ...prev, [sug.id]: e.target.value }))}
+                              rows={2}
+                              className="text-small bg-surface focus-visible:ring-accent"
+                              disabled={isApplied}
+                              placeholder="e.g. Deployed microservices using Kubernetes on AWS EKS during my internship..."
+                            />
+                            <div className="flex justify-end">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={isSynthesizing || isApplied || !(candidateFacts[sug.id]?.trim()?.length > 4)}
+                                onClick={() => handleSynthesizeBullet(sug)}
+                                className="text-caption gap-1.5"
+                              >
+                                {isSynthesizing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5 text-accent" />}
+                                Synthesize Truthful Bullet
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Synthesized Bullet Preview */}
+                          {currentEditBullet && (
+                            <div className="space-y-2 pt-1 border-t border-border/40">
+                              <label className="text-caption font-semibold text-primary">
+                                Synthesized Bullet (Fact-Grounded & Editable):
+                              </label>
+                              <Textarea
+                                value={currentEditBullet}
+                                onChange={(e) => setEditingBullets((prev) => ({ ...prev, [sug.id]: e.target.value }))}
+                                rows={2}
+                                className="text-small bg-surface focus-visible:ring-accent"
+                                disabled={isApplied}
+                              />
+                              <div className="flex justify-end pt-1">
+                                <Button
+                                  size="sm"
+                                  variant={isApplied ? "outline" : "primary"}
+                                  disabled={isApplied || isApplying || !currentEditBullet.trim()}
+                                  onClick={() => handleApplyRemediation(sug)}
+                                  className="text-caption gap-1.5"
+                                >
+                                  {isApplying ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : isApplied ? (
+                                    <Check className="h-3.5 w-3.5 text-status-success" />
+                                  ) : (
+                                    <PlusCircle className="h-3.5 w-3.5" />
+                                  )}
+                                  {isApplied ? "Applied to Targeted Resume" : "Apply to Targeted Resume"}
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        /* Case 3: ExplainHardGap */
+                        <div className="rounded bg-surface-raised p-3 border border-border/60 text-caption text-secondary space-y-1">
+                          <span className="font-semibold text-primary">Why this gap cannot be phrased away: </span>
+                          <span>The role demands seniority or multi-year duration beyond your current timeline. Focus on highlighting strong depth in adjacent areas.</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </CardContent>
             </Card>
           )}

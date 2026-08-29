@@ -1,6 +1,6 @@
 import json
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict
 from fastapi import HTTPException, status
 from google import genai
 from google.genai import types
@@ -22,6 +22,7 @@ from app.schemas.job_description import (
     SkillRequirement,
 )
 from app.schemas.requirement_match import RequirementMatch
+from app.schemas.remediation import RemediationSuggestion
 from app.ai.scoring import calculate_deterministic_ats_score
 from app.ai.skills import (
     normalize_skill_name,
@@ -31,6 +32,7 @@ from app.ai.skills import (
     deduplicate_and_normalize_partial_skills,
 )
 from app.ai.grounding import reconcile_requirement_coverage
+from app.ai.remediation_engine import generate_remediation_suggestions
 
 SYSTEM_INSTRUCTION = """You are a Senior Principal Technical Recruiter and ATS (Applicant Tracking System) Intelligence Engine.
 Your task is to analyze candidate resume evidence against a target Job Description in a SINGLE comprehensive pass:
@@ -449,6 +451,11 @@ class GeminiAnalyzerProvider:
             candidate_evidence=candidate_evidence,
         )
 
+        remediation_suggestions = generate_remediation_suggestions(
+            matches=grounded_requirement_matches,
+            candidate_evidence=candidate_evidence,
+        )
+
         metadata = AnalysisMetadata(
             provider=self.name,
             model=model_name,
@@ -472,5 +479,6 @@ class GeminiAnalyzerProvider:
             partial_skills=normalized_partial,
             job_intelligence=structured_job_intelligence,
             requirement_matches=grounded_requirement_matches,
+            remediation_suggestions=remediation_suggestions,
             metadata=metadata,
         )

@@ -296,18 +296,49 @@ async def persist_analysis_results(
             "metadata": analysis.metadata.model_dump(by_alias=True),
         },
     }
-
     fields_body = {"fields": _encode_firestore_fields(update_payload)}
 
-    # Patch with field mask or document update
     try:
-        # Get existing document to preserve untargeted fields
         existing = requests.get(doc_url, headers=headers, timeout=10)
         existing_fields = existing.json().get("fields", {}) if existing.status_code == 200 else {}
         merged_fields = {**existing_fields, **fields_body["fields"]}
-
-        res = requests.patch(doc_url, headers=headers, json={"fields": merged_fields}, timeout=10)
-        if res.status_code not in (200, 201):
-            print(f"Warning: Firestore patch returned status {res.status_code}: {res.text}")
+        requests.patch(doc_url, headers=headers, json={"fields": merged_fields}, timeout=10)
     except Exception as e:
         print(f"Warning: Failed to persist analysis to Firestore: {e}")
+
+
+async def get_resume_document(
+    user: AuthenticatedUser, resume_id: str
+) -> Optional[Dict[str, Any]]:
+    """Retrieves raw decoded resume document from Firestore."""
+    doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
+    headers = {"Authorization": f"Bearer {user.token}"}
+    try:
+        res = requests.get(doc_url, headers=headers, timeout=10)
+        if res.status_code == 200:
+            return _decode_firestore_doc(res.json())
+    except Exception:
+        pass
+    return None
+
+
+async def save_resume_snapshot(
+    user: AuthenticatedUser, resume_id: str, resume_data: Dict[str, Any]
+) -> bool:
+    """Saves or updates a resume document with its snapshot in Firestore."""
+    doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
+    headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
+    fields_body = {"fields": _encode_firestore_fields(resume_data)}
+    try:
+        res = requests.patch(doc_url, headers=headers, json=fields_body, timeout=10)
+        return res.status_code in (200, 201)
+    except Exception as e:
+        print(f"Error saving resume snapshot: {e}")
+        return False
+
+
+class ResumeService:
+    get_candidate_resume_data = staticmethod(get_candidate_resume_data)
+    persist_analysis_results = staticmethod(persist_analysis_results)
+    get_resume_document = staticmethod(get_resume_document)
+    save_resume_snapshot = staticmethod(save_resume_snapshot)
