@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCareer, RequirementMatchData, RemediationSuggestionData } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
@@ -72,7 +72,7 @@ function AnalyzerContent() {
   const searchParams = useSearchParams();
   const resumeIdParam = searchParams.get("resumeId");
 
-  const { resumes, skills, addSkill, saveAtsAnalysis } = useCareer();
+  const { resumes, skills, addSkill } = useCareer();
   const { user } = useAuth();
 
   const [selectedResumeId, setSelectedResumeId] = useState<string>(
@@ -114,10 +114,18 @@ function AnalyzerContent() {
   const [targetedResumeId, setTargetedResumeId] = useState<string | null>(null);
 
   // Automatically restore saved analysis when selecting an analyzed resume
+  const lastLoadedKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (selectedResumeId && selectedResumeId !== "workspace") {
       const found = resumes.find((r) => r.id === selectedResumeId);
       if (found && typeof found.atsScore === "number") {
+        const resumeAnalysisKey = `${found.id}_${found.lastAnalyzedAt || ""}_${found.atsScore}`;
+        if (lastLoadedKeyRef.current === resumeAnalysisKey) {
+          return;
+        }
+        lastLoadedKeyRef.current = resumeAnalysisKey;
+
         setOverallScore(found.atsScore);
         if (found.scoreBreakdown) {
           setRelevanceScore(found.scoreBreakdown.relevance);
@@ -138,7 +146,11 @@ function AnalyzerContent() {
           setRemediationSuggestions(found.analysisResults.remediationSuggestions || []);
         }
         setHasAnalyzed(true);
+      } else {
+        lastLoadedKeyRef.current = null;
       }
+    } else {
+      lastLoadedKeyRef.current = null;
     }
   }, [selectedResumeId, resumes]);
 
@@ -213,25 +225,8 @@ function AnalyzerContent() {
         setEditingBullets((prev) => ({ ...prev, ...editMap }));
       }
 
-      // Persist to client store state for reactive UI updates
-      if (selectedResumeId && selectedResumeId !== "workspace") {
-        await saveAtsAnalysis(selectedResumeId, {
-          atsScore: data.atsScore,
-          scoreBreakdown: data.scoreBreakdown,
-          targetRole: jobTitle.trim(),
-          targetCompany: jobCompany.trim(),
-          analysisResults: {
-            summaryFeedback: data.summaryFeedback,
-            matchingSkills: data.matchingSkills,
-            missingSkills: data.missingSkills,
-            partialSkills: data.partialSkills,
-            jobIntelligence: data.jobIntelligence,
-            requirementMatches: data.requirementMatches,
-            remediationSuggestions: data.remediationSuggestions,
-            metadata: data.metadata,
-          },
-        });
-      }
+      // Local component state is already updated above.
+      // Persistence is handled authoritatively by the backend endpoint in Firestore.
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to analyze resume. Please try again.");
     } finally {

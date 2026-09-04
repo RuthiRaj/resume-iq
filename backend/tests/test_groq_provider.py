@@ -236,3 +236,48 @@ async def test_groq_provider_successful_analysis(monkeypatch):
     assert result.metadata.provider == "groq"
     assert result.metadata.model == "llama-3.3-70b-versatile"
     assert result.metadata.job_description_hash == "mock_hash_xyz"
+
+
+@pytest.mark.asyncio
+async def test_groq_provider_reuses_persistent_client(monkeypatch):
+    from app.core import config
+    from app.ai.providers.groq_provider import get_shared_groq_client, close_groq_client
+
+    monkeypatch.setattr(config.settings, "GROQ_API_KEY", "persistent_test_key")
+
+    creation_count = 0
+
+    class MockPersistentAsyncGroq:
+        def __init__(self, *args, **kwargs):
+            nonlocal creation_count
+            creation_count += 1
+            self.timeout = kwargs.get("timeout")
+            self.api_key = kwargs.get("api_key")
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(groq_provider_module, "AsyncGroq", MockPersistentAsyncGroq)
+
+    # First access creates the client
+    client1 = get_shared_groq_client("persistent_test_key")
+    assert client1.api_key == "persistent_test_key"
+    assert client1.timeout == 60.0
+    assert creation_count == 1
+
+    # Second access reuses the identical client instance (no second creation)
+    client2 = get_shared_groq_client("persistent_test_key")
+    assert client2 is client1
+    assert creation_count == 1
+
+    # Clean shutdown
+    await close_groq_client()
+    assert client1.closed is True
+
+    # Next access creates a fresh client
+    client3 = get_shared_groq_client("persistent_test_key")
+    assert client3 is not client1
+    assert creation_count == 2
+
+    await close_groq_client()

@@ -1,6 +1,7 @@
+import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from fastapi import HTTPException, status
 from groq import AsyncGroq
 from app.core.config import settings
@@ -170,6 +171,47 @@ Return a single JSON object matching this exact structure:
 }"""
 
 
+_shared_groq_client: Optional[AsyncGroq] = None
+_shared_groq_key: Optional[str] = None
+_shared_groq_class: Any = None
+
+
+def get_shared_groq_client(api_key: str) -> AsyncGroq:
+    """
+    Returns a persistent AsyncGroq client singleton with connection pooling.
+    Safely re-creates the client if API key or AsyncGroq class changes (e.g. during testing).
+    """
+    global _shared_groq_client, _shared_groq_key, _shared_groq_class
+    if (
+        _shared_groq_client is None
+        or _shared_groq_key != api_key
+        or _shared_groq_class is not AsyncGroq
+    ):
+        _shared_groq_client = AsyncGroq(
+            api_key=api_key,
+            timeout=60.0,
+        )
+        _shared_groq_key = api_key
+        _shared_groq_class = AsyncGroq
+    return _shared_groq_client
+
+
+async def close_groq_client() -> None:
+    """Closes the shared AsyncGroq client during application shutdown."""
+    global _shared_groq_client, _shared_groq_key, _shared_groq_class
+    if _shared_groq_client is not None:
+        try:
+            if hasattr(_shared_groq_client, "close") and callable(_shared_groq_client.close):
+                res = _shared_groq_client.close()
+                if asyncio.iscoroutine(res):
+                    await res
+        except Exception:
+            pass
+        _shared_groq_client = None
+        _shared_groq_key = None
+        _shared_groq_class = None
+
+
 class GroqAnalyzerProvider:
     @property
     def name(self) -> str:
@@ -192,10 +234,7 @@ class GroqAnalyzerProvider:
 
         model_name = settings.AI_ANALYZER_MODEL or "openai/gpt-oss-120b"
 
-        client = AsyncGroq(
-            api_key=api_key,
-            timeout=60.0,
-        )
+        client = get_shared_groq_client(api_key)
 
         compact_evidence_json = json.dumps(
             candidate_evidence.model_dump(by_alias=True),

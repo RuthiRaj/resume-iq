@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useAuth } from "./auth-context";
 import { db, storage } from "./firebase";
 import {
@@ -105,6 +105,49 @@ export interface AnalysisResultData {
   };
 }
 
+export interface ChangeRecordData {
+  id: string;
+  remediationId?: string;
+  actionType: "ApplyRemediation" | "DirectEdit" | "RevertChange" | "CandidateFactAddition";
+  requirementName: string;
+  section: "Experience" | "Project" | "SkillTag" | "Education" | "Certification" | "Summary" | "None";
+  targetItemId: string;
+  targetBulletIndex?: number;
+  originalText?: string;
+  proposedText?: string;
+  approvedText: string;
+  status: "Draft" | "Approved" | "Applied" | "Reverted";
+  versionIntroduced: number;
+  versionReverted?: number;
+  appliedAt: string;
+  revertedAt?: string;
+  revertedChangeId?: string;
+}
+
+export interface RequirementProgressionData {
+  requirementName: string;
+  category: string;
+  importance: "MustHave" | "Preferred" | "Unspecified";
+  baselineStatus: "StrongMatch" | "PartialMatch" | "Missing";
+  currentStatus: "StrongMatch" | "PartialMatch" | "Missing";
+  progression: "Resolved" | "Improved" | "Unchanged" | "UnresolvedHardGap";
+  verifiedEvidence?: string;
+}
+
+export interface FitComparisonData {
+  variantId: string;
+  targetRole: string;
+  targetCompany?: string;
+  baselineScore: number;
+  currentScore: number;
+  scoreDelta: number;
+  baselineBreakdown: { relevance: number; keywords: number; metrics: number; formatting: number };
+  currentBreakdown: { relevance: number; keywords: number; metrics: number; formatting: number };
+  requirementProgressions: RequirementProgressionData[];
+  totalGapsResolved: number;
+  totalGapsRemaining: number;
+}
+
 export interface ResumeItem {
   id: string;
   title: string;
@@ -133,6 +176,14 @@ export interface ResumeItem {
   };
   analysisResults?: AnalysisResultData;
   lastAnalyzedAt?: string;
+  isTargetedVariant?: boolean;
+  masterResumeId?: string;
+  jobDescriptionHash?: string;
+  version?: number;
+  baselineScore?: number;
+  currentScore?: number;
+  scoreDelta?: number;
+  changeLedger?: ChangeRecordData[];
 }
 
 export interface RecommendedAction {
@@ -156,6 +207,12 @@ const defaultEmptyProfile: ProfileData = {
   summary: "",
   targetRoles: [],
 };
+
+function isCollectionEqual<T>(a: T, b: T): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 interface CareerContextType {
   profile: ProfileData;
@@ -235,9 +292,26 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   const [actions, setActions] = useState<RecommendedAction[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Set up real-time Firestore listeners for all collections scoped to user.uid
+  // Keep refs for callbacks needing fresh state without re-creating identity
+  const resumesRef = useRef<ResumeItem[]>(resumes);
   useEffect(() => {
-    if (!user) {
+    resumesRef.current = resumes;
+  }, [resumes]);
+
+  const profileRef = useRef<ProfileData>(profile);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  // Set up real-time Firestore listeners scoped strictly to user.uid
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) {
       setProfile(defaultEmptyProfile);
       setEducation([]);
       setSkills([]);
@@ -252,83 +326,101 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const uid = user.uid;
+    // Track initial load of all 10 collections before marking loaded
+    const initialLoadedSet = new Set<string>();
+    const markLoaded = (name: string) => {
+      initialLoadedSet.add(name);
+      if (initialLoadedSet.size >= 10) {
+        setIsLoaded(true);
+      }
+    };
 
     // 1. Profile listener
     const unsubProfile = onSnapshot(doc(db, "users", uid, "profile", "main"), (snap) => {
       if (snap.exists()) {
-        setProfile(snap.data() as ProfileData);
+        const data = snap.data() as ProfileData;
+        setProfile((prev) => (isCollectionEqual(prev, data) ? prev : data));
       } else {
-        setProfile({
+        const fallback: ProfileData = {
           ...defaultEmptyProfile,
-          email: user.email || "",
-          fullName: user.displayName || "",
-        });
+          email: userRef.current?.email || "",
+          fullName: userRef.current?.displayName || "",
+        };
+        setProfile((prev) => (isCollectionEqual(prev, fallback) ? prev : fallback));
       }
+      markLoaded("profile");
     });
 
     // 2. Education listener
     const unsubEducation = onSnapshot(collection(db, "users", uid, "education"), (snap) => {
       const list: EducationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EducationData));
-      setEducation(list);
+      setEducation((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("education");
     });
 
     // 3. Skills listener
     const unsubSkills = onSnapshot(collection(db, "users", uid, "skills"), (snap) => {
       const list: SkillData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as SkillData));
-      setSkills(list);
+      setSkills((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("skills");
     });
 
     // 4. Projects listener
     const unsubProjects = onSnapshot(collection(db, "users", uid, "projects"), (snap) => {
       const list: ProjectData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProjectData));
-      setProjects(list);
+      setProjects((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("projects");
     });
 
     // 5. Experience listener
     const unsubExperience = onSnapshot(collection(db, "users", uid, "experience"), (snap) => {
       const list: ExperienceData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ExperienceData));
-      setExperience(list);
+      setExperience((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("experience");
     });
 
     // 6. Certifications listener
     const unsubCertifications = onSnapshot(collection(db, "users", uid, "certifications"), (snap) => {
       const list: CertificationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as CertificationData));
-      setCertifications(list);
+      setCertifications((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("certifications");
     });
 
     // 7. Achievements listener
     const unsubAchievements = onSnapshot(collection(db, "users", uid, "achievements"), (snap) => {
       const list: AchievementData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as AchievementData));
-      setAchievements(list);
+      setAchievements((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("achievements");
     });
 
     // 8. Documents listener
     const unsubDocuments = onSnapshot(collection(db, "users", uid, "documents"), (snap) => {
       const list: DocumentData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as DocumentData));
-      setDocuments(list);
+      setDocuments((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("documents");
     });
 
     // 9. Resumes listener
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
       const list: ResumeItem[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ResumeItem));
-      setResumes(list);
+      setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("resumes");
     });
 
     // 10. Actions listener
     const unsubActions = onSnapshot(collection(db, "users", uid, "actions"), (snap) => {
       const list: RecommendedAction[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as RecommendedAction));
-      setActions(list);
-      setIsLoaded(true);
+      setActions((prev) => (isCollectionEqual(prev, list) ? prev : list));
+      markLoaded("actions");
     });
 
     return () => {
@@ -343,216 +435,325 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       unsubResumes();
       unsubActions();
     };
-  }, [user]);
+  }, [user?.uid]);
 
-  // Firestore CRUD Operations
-  const updateProfile = async (data: ProfileData) => {
-    if (!user) return;
-    await setDoc(doc(db, "users", user.uid, "profile", "main"), data, { merge: true });
-  };
+  // Firestore CRUD Operations wrapped with useCallback
+  const updateProfile = useCallback(
+    async (data: ProfileData) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await setDoc(doc(db, "users", uid, "profile", "main"), data, { merge: true });
+    },
+    []
+  );
 
-  const addEducation = async (data: Omit<EducationData, "id">) => {
-    if (!user) return;
-    await addDoc(collection(db, "users", user.uid, "education"), data);
-  };
+  const addEducation = useCallback(
+    async (data: Omit<EducationData, "id">) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await addDoc(collection(db, "users", uid, "education"), data);
+    },
+    []
+  );
 
-  const updateEducation = async (id: string, data: Partial<EducationData>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "education", id), data);
-  };
+  const updateEducation = useCallback(
+    async (id: string, data: Partial<EducationData>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "education", id), data);
+    },
+    []
+  );
 
-  const deleteEducation = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "education", id));
-  };
+  const deleteEducation = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "education", id));
+    },
+    []
+  );
 
-  const addSkill = async (data: Omit<SkillData, "id">) => {
-    if (!user) return;
-    await addDoc(collection(db, "users", user.uid, "skills"), data);
-  };
+  const addSkill = useCallback(
+    async (data: Omit<SkillData, "id">) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await addDoc(collection(db, "users", uid, "skills"), data);
+    },
+    []
+  );
 
-  const updateSkill = async (id: string, data: Partial<SkillData>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "skills", id), data);
-  };
+  const updateSkill = useCallback(
+    async (id: string, data: Partial<SkillData>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "skills", id), data);
+    },
+    []
+  );
 
-  const deleteSkill = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "skills", id));
-  };
+  const deleteSkill = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "skills", id));
+    },
+    []
+  );
 
-  const addProject = async (data: Omit<ProjectData, "id">) => {
-    if (!user) return;
-    await addDoc(collection(db, "users", user.uid, "projects"), data);
-  };
+  const addProject = useCallback(
+    async (data: Omit<ProjectData, "id">) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await addDoc(collection(db, "users", uid, "projects"), data);
+    },
+    []
+  );
 
-  const updateProject = async (id: string, data: Partial<ProjectData>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "projects", id), data);
-  };
+  const updateProject = useCallback(
+    async (id: string, data: Partial<ProjectData>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "projects", id), data);
+    },
+    []
+  );
 
-  const deleteProject = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "projects", id));
-  };
+  const deleteProject = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "projects", id));
+    },
+    []
+  );
 
-  const addExperience = async (data: Omit<ExperienceData, "id">) => {
-    if (!user) return;
-    await addDoc(collection(db, "users", user.uid, "experience"), data);
-  };
+  const addExperience = useCallback(
+    async (data: Omit<ExperienceData, "id">) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await addDoc(collection(db, "users", uid, "experience"), data);
+    },
+    []
+  );
 
-  const updateExperience = async (id: string, data: Partial<ExperienceData>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "experience", id), data);
-  };
+  const updateExperience = useCallback(
+    async (id: string, data: Partial<ExperienceData>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "experience", id), data);
+    },
+    []
+  );
 
-  const deleteExperience = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "experience", id));
-  };
+  const deleteExperience = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "experience", id));
+    },
+    []
+  );
 
-  const addCertification = async (data: Omit<CertificationData, "id">) => {
-    if (!user) return;
-    await addDoc(collection(db, "users", user.uid, "certifications"), data);
-  };
+  const addCertification = useCallback(
+    async (data: Omit<CertificationData, "id">) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await addDoc(collection(db, "users", uid, "certifications"), data);
+    },
+    []
+  );
 
-  const updateCertification = async (id: string, data: Partial<CertificationData>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "certifications", id), data);
-  };
+  const updateCertification = useCallback(
+    async (id: string, data: Partial<CertificationData>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "certifications", id), data);
+    },
+    []
+  );
 
-  const deleteCertification = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "certifications", id));
-  };
+  const deleteCertification = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "certifications", id));
+    },
+    []
+  );
 
-  const addAchievement = async (data: Omit<AchievementData, "id">) => {
-    if (!user) return;
-    await addDoc(collection(db, "users", user.uid, "achievements"), data);
-  };
+  const addAchievement = useCallback(
+    async (data: Omit<AchievementData, "id">) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await addDoc(collection(db, "users", uid, "achievements"), data);
+    },
+    []
+  );
 
-  const updateAchievement = async (id: string, data: Partial<AchievementData>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "achievements", id), data);
-  };
+  const updateAchievement = useCallback(
+    async (id: string, data: Partial<AchievementData>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "achievements", id), data);
+    },
+    []
+  );
 
-  const deleteAchievement = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "achievements", id));
-  };
+  const deleteAchievement = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "achievements", id));
+    },
+    []
+  );
 
-  const addDocument = async (data: Omit<DocumentData, "id">, file?: File) => {
-    if (!user) return;
-    let fileUrl = "";
-    let storagePath = "";
+  const addDocument = useCallback(
+    async (data: Omit<DocumentData, "id">, file?: File) => {
+      const currentUser = userRef.current;
+      if (!currentUser?.uid) return;
+      let fileUrl = "";
+      let storagePath = "";
 
-    if (file) {
-      const sanitizedName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
-      storagePath = `users/${user.uid}/documents/${sanitizedName}`;
-      const fileRef = ref(storage, storagePath);
-      await uploadBytesResumable(fileRef, file);
-      try {
-        fileUrl = await getDownloadURL(fileRef);
-      } catch {
-        // Storage URL placeholder if storage is still initializing
-        fileUrl = "";
-      }
-    }
-
-    await addDoc(collection(db, "users", user.uid, "documents"), {
-      ...data,
-      fileUrl,
-      storagePath,
-      createdAt: new Date().toISOString(),
-    });
-  };
-
-  const deleteDocument = async (id: string, storagePath?: string) => {
-    if (!user) return;
-    if (storagePath) {
-      try {
+      if (file) {
+        const sanitizedName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+        storagePath = `users/${currentUser.uid}/documents/${sanitizedName}`;
         const fileRef = ref(storage, storagePath);
-        await deleteObject(fileRef);
-      } catch {
-        // ignore storage deletion errors
+        await uploadBytesResumable(fileRef, file);
+        try {
+          fileUrl = await getDownloadURL(fileRef);
+        } catch {
+          // Storage URL placeholder if storage is still initializing
+          fileUrl = "";
+        }
       }
-    }
-    await deleteDoc(doc(db, "users", user.uid, "documents", id));
-  };
 
-  const addResume = async (resume: Omit<ResumeItem, "id">): Promise<string> => {
-    if (!user) throw new Error("Unauthenticated");
-    const docRef = await addDoc(collection(db, "users", user.uid, "resumes"), {
-      ...resume,
-      createdAt: new Date().toISOString(),
-    });
-    return docRef.id;
-  };
+      await addDoc(collection(db, "users", currentUser.uid, "documents"), {
+        ...data,
+        fileUrl,
+        storagePath,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    []
+  );
 
-  const updateResume = async (id: string, data: Partial<ResumeItem>) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "resumes", id), {
-      ...data,
-      lastEdited: new Date().toISOString().split("T")[0],
-    });
-  };
+  const deleteDocument = useCallback(
+    async (id: string, storagePath?: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      if (storagePath) {
+        try {
+          const fileRef = ref(storage, storagePath);
+          await deleteObject(fileRef);
+        } catch {
+          // ignore storage deletion errors
+        }
+      }
+      await deleteDoc(doc(db, "users", uid, "documents", id));
+    },
+    []
+  );
 
-  const deleteResume = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "resumes", id));
-  };
+  const addResume = useCallback(
+    async (resume: Omit<ResumeItem, "id">): Promise<string> => {
+      const uid = userRef.current?.uid;
+      if (!uid) throw new Error("Unauthenticated");
+      const docRef = await addDoc(collection(db, "users", uid, "resumes"), {
+        ...resume,
+        createdAt: new Date().toISOString(),
+      });
+      return docRef.id;
+    },
+    []
+  );
 
-  const duplicateResume = async (id: string) => {
-    if (!user) return;
-    const source = resumes.find((r) => r.id === id);
-    if (!source) return;
-    const { id: _, ...rest } = source;
-    await addDoc(collection(db, "users", user.uid, "resumes"), {
-      ...rest,
-      title: `${source.title} (Copy)`,
-      lastEdited: new Date().toISOString().split("T")[0],
-    });
-  };
+  const updateResume = useCallback(
+    async (id: string, data: Partial<ResumeItem>) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "resumes", id), {
+        ...data,
+        lastEdited: new Date().toISOString().split("T")[0],
+      });
+    },
+    []
+  );
 
-  const saveAtsAnalysis = async (
-    resumeId: string,
-    analysis: {
-      atsScore: number;
-      scoreBreakdown: { relevance: number; keywords: number; metrics: number; formatting: number };
-      targetRole?: string;
-      targetCompany?: string;
-      analysisResults?: AnalysisResultData;
-    }
-  ) => {
-    if (!user) return;
-    await updateDoc(doc(db, "users", user.uid, "resumes", resumeId), {
-      score: analysis.atsScore,
-      atsScore: analysis.atsScore,
-      scoreBreakdown: analysis.scoreBreakdown,
-      lastAnalyzedAt: new Date().toISOString(),
-      ...(analysis.targetRole ? { targetRole: analysis.targetRole } : {}),
-      ...(analysis.targetCompany ? { targetCompany: analysis.targetCompany } : {}),
-      ...(analysis.analysisResults ? { analysisResults: analysis.analysisResults } : {}),
-    });
-  };
+  const deleteResume = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "resumes", id));
+    },
+    []
+  );
 
-  const dismissAction = async (id: string) => {
-    if (!user) return;
-    await deleteDoc(doc(db, "users", user.uid, "actions", id));
-  };
+  const duplicateResume = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      const source = resumesRef.current.find((r) => r.id === id);
+      if (!source) return;
+      const { id: _, ...rest } = source;
+      await addDoc(collection(db, "users", uid, "resumes"), {
+        ...rest,
+        title: `${source.title} (Copy)`,
+        lastEdited: new Date().toISOString().split("T")[0],
+      });
+    },
+    []
+  );
+
+  const saveAtsAnalysis = useCallback(
+    async (
+      resumeId: string,
+      analysis: {
+        atsScore: number;
+        scoreBreakdown: { relevance: number; keywords: number; metrics: number; formatting: number };
+        targetRole?: string;
+        targetCompany?: string;
+        analysisResults?: AnalysisResultData;
+      }
+    ) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await updateDoc(doc(db, "users", uid, "resumes", resumeId), {
+        score: analysis.atsScore,
+        atsScore: analysis.atsScore,
+        scoreBreakdown: analysis.scoreBreakdown,
+        lastAnalyzedAt: new Date().toISOString(),
+        ...(analysis.targetRole ? { targetRole: analysis.targetRole } : {}),
+        ...(analysis.targetCompany ? { targetCompany: analysis.targetCompany } : {}),
+        ...(analysis.analysisResults ? { analysisResults: analysis.analysisResults } : {}),
+      });
+    },
+    []
+  );
+
+  const dismissAction = useCallback(
+    async (id: string) => {
+      const uid = userRef.current?.uid;
+      if (!uid) return;
+      await deleteDoc(doc(db, "users", uid, "actions", id));
+    },
+    []
+  );
 
   // Seed sample data explicitly on demand for demos/testing
-  const seedSampleData = async () => {
-    if (!user) return;
-    const uid = user.uid;
+  const seedSampleData = useCallback(async () => {
+    const currentUser = userRef.current;
+    if (!currentUser?.uid) return;
+    const uid = currentUser.uid;
 
     // 1. Profile
     await setDoc(
       doc(db, "users", uid, "profile", "main"),
       {
-        fullName: profile.fullName || user.displayName || "Alex Morgan",
+        fullName: profileRef.current.fullName || currentUser.displayName || "Alex Morgan",
         headline: "Full Stack Engineer & AI Systems Specialist",
-        email: user.email || "alex.morgan@example.com",
+        email: currentUser.email || "alex.morgan@example.com",
         phone: "+1 (555) 382-9104",
         location: "San Francisco, CA (Open to Remote)",
         website: "https://alexmorgan.dev",
@@ -671,52 +872,95 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       description: "Adding specific metrics (e.g. latency or velocity %) increases ATS relevance score.",
       actionUrl: "/workspace/experience",
     });
-  };
+  }, []);
+
+  const value = useMemo<CareerContextType>(
+    () => ({
+      profile,
+      updateProfile,
+      education,
+      addEducation,
+      updateEducation,
+      deleteEducation,
+      skills,
+      addSkill,
+      updateSkill,
+      deleteSkill,
+      projects,
+      addProject,
+      updateProject,
+      deleteProject,
+      experience,
+      addExperience,
+      updateExperience,
+      deleteExperience,
+      certifications,
+      addCertification,
+      updateCertification,
+      deleteCertification,
+      achievements,
+      addAchievement,
+      updateAchievement,
+      deleteAchievement,
+      documents,
+      addDocument,
+      deleteDocument,
+      resumes,
+      addResume,
+      updateResume,
+      deleteResume,
+      duplicateResume,
+      saveAtsAnalysis,
+      actions,
+      dismissAction,
+      seedSampleData,
+      isLoaded,
+    }),
+    [
+      profile,
+      updateProfile,
+      education,
+      addEducation,
+      updateEducation,
+      deleteEducation,
+      skills,
+      addSkill,
+      updateSkill,
+      deleteSkill,
+      projects,
+      addProject,
+      updateProject,
+      deleteProject,
+      experience,
+      addExperience,
+      updateExperience,
+      deleteExperience,
+      certifications,
+      addCertification,
+      updateCertification,
+      deleteCertification,
+      achievements,
+      addAchievement,
+      updateAchievement,
+      deleteAchievement,
+      documents,
+      addDocument,
+      deleteDocument,
+      resumes,
+      addResume,
+      updateResume,
+      deleteResume,
+      duplicateResume,
+      saveAtsAnalysis,
+      actions,
+      dismissAction,
+      seedSampleData,
+      isLoaded,
+    ]
+  );
 
   return (
-    <CareerContext.Provider
-      value={{
-        profile,
-        updateProfile,
-        education,
-        addEducation,
-        updateEducation,
-        deleteEducation,
-        skills,
-        addSkill,
-        updateSkill,
-        deleteSkill,
-        projects,
-        addProject,
-        updateProject,
-        deleteProject,
-        experience,
-        addExperience,
-        updateExperience,
-        deleteExperience,
-        certifications,
-        addCertification,
-        updateCertification,
-        deleteCertification,
-        achievements,
-        addAchievement,
-        updateAchievement,
-        deleteAchievement,
-        documents,
-        addDocument,
-        deleteDocument,
-        resumes,
-        addResume,
-        updateResume,
-        deleteResume,
-        duplicateResume,
-        saveAtsAnalysis,
-        actions,
-        dismissAction,
-        seedSampleData,
-        isLoaded,
-      }}
-    >
+    <CareerContext.Provider value={value}>
       {children}
     </CareerContext.Provider>
   );

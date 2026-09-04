@@ -1,4 +1,5 @@
-import requests
+import asyncio
+import httpx
 from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, status
 from app.core.config import settings
@@ -12,6 +13,28 @@ from app.schemas.candidate import (
     CertificationItem,
 )
 from app.schemas.analyze import AnalyzeResponse
+
+
+_async_client: Optional[httpx.AsyncClient] = None
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Provides a thread-safe, persistent httpx.AsyncClient with connection pooling."""
+    global _async_client
+    if _async_client is None or _async_client.is_closed:
+        _async_client = httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=30.0),
+            timeout=httpx.Timeout(10.0, connect=5.0),
+        )
+    return _async_client
+
+
+async def close_http_client() -> None:
+    """Closes the shared httpx.AsyncClient during application shutdown."""
+    global _async_client
+    if _async_client is not None and not _async_client.is_closed:
+        await _async_client.aclose()
+        _async_client = None
 
 
 def _decode_firestore_value(val: Any) -> Any:
@@ -82,23 +105,26 @@ def _get_firestore_base_url() -> str:
 
 
 async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
-    """Loads the candidate's master profile from Firestore."""
+    """
+    Loads the candidate's master profile and subcollections from Firestore concurrently.
+    Reuses connection pool to execute all 6 queries in parallel without blocking the event loop.
+    """
     base_url = f"{_get_firestore_base_url()}/users/{user.uid}"
     headers = {"Authorization": f"Bearer {user.token}"}
+    client = get_http_client()
 
-    # 1. Main Profile
-    profile_data: Dict[str, Any] = {}
-    try:
-        res = requests.get(f"{base_url}/profile/main", headers=headers, timeout=10)
-        if res.status_code == 200:
-            profile_data = _decode_firestore_doc(res.json())
-    except Exception:
-        pass
-
-    # 2. Subcollections helper
-    def fetch_subcollection(name: str) -> List[Dict[str, Any]]:
+    async def _fetch_doc(url: str) -> Dict[str, Any]:
         try:
-            res = requests.get(f"{base_url}/{name}", headers=headers, timeout=10)
+            res = await client.get(url, headers=headers)
+            if res.status_code == 200:
+                return _decode_firestore_doc(res.json())
+        except Exception:
+            pass
+        return {}
+
+    async def _fetch_subcollection(url: str) -> List[Dict[str, Any]]:
+        try:
+            res = await client.get(url, headers=headers)
             if res.status_code == 200:
                 docs = res.json().get("documents", [])
                 return [_decode_firestore_doc(d) for d in docs]
@@ -106,11 +132,15 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             pass
         return []
 
-    exp_docs = fetch_subcollection("experience")
-    proj_docs = fetch_subcollection("projects")
-    skill_docs = fetch_subcollection("skills")
-    edu_docs = fetch_subcollection("education")
-    cert_docs = fetch_subcollection("certifications")
+    # Concurrent fetch across profile and all 5 subcollections
+    profile_data, exp_docs, proj_docs, skill_docs, edu_docs, cert_docs = await asyncio.gather(
+        _fetch_doc(f"{base_url}/profile/main"),
+        _fetch_subcollection(f"{base_url}/experience"),
+        _fetch_subcollection(f"{base_url}/projects"),
+        _fetch_subcollection(f"{base_url}/skills"),
+        _fetch_subcollection(f"{base_url}/education"),
+        _fetch_subcollection(f"{base_url}/certifications"),
+    )
 
     experience = [
         ExperienceItem(
@@ -185,9 +215,10 @@ async def get_candidate_resume_data(
 
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}"}
+    client = get_http_client()
 
     try:
-        res = requests.get(doc_url, headers=headers, timeout=10)
+        res = await client.get(doc_url, headers=headers)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -274,12 +305,13 @@ async def get_candidate_resume_data(
 async def persist_analysis_results(
     user: AuthenticatedUser, resume_id: str, analysis: AnalyzeResponse
 ) -> None:
-    """Persists analysis results to the user's Firestore document."""
+    """Persists analysis results to the user's Firestore document asynchronously."""
     if resume_id == "workspace":
         return
 
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
+    client = get_http_client()
 
     update_payload = {
         "score": analysis.ats_score,
@@ -293,16 +325,19 @@ async def persist_analysis_results(
             "matchingSkills": [s.model_dump(by_alias=True) for s in analysis.matching_skills],
             "missingSkills": [s.model_dump(by_alias=True) for s in analysis.missing_skills],
             "partialSkills": [s.model_dump(by_alias=True) for s in analysis.partial_skills],
+            "jobIntelligence": analysis.job_intelligence.model_dump(by_alias=True) if analysis.job_intelligence else None,
+            "requirementMatches": [m.model_dump(by_alias=True) for m in analysis.requirement_matches],
+            "remediationSuggestions": [s.model_dump(by_alias=True) for s in analysis.remediation_suggestions],
             "metadata": analysis.metadata.model_dump(by_alias=True),
         },
     }
     fields_body = {"fields": _encode_firestore_fields(update_payload)}
 
     try:
-        existing = requests.get(doc_url, headers=headers, timeout=10)
+        existing = await client.get(doc_url, headers=headers)
         existing_fields = existing.json().get("fields", {}) if existing.status_code == 200 else {}
         merged_fields = {**existing_fields, **fields_body["fields"]}
-        requests.patch(doc_url, headers=headers, json={"fields": merged_fields}, timeout=10)
+        await client.patch(doc_url, headers=headers, json={"fields": merged_fields})
     except Exception as e:
         print(f"Warning: Failed to persist analysis to Firestore: {e}")
 
@@ -310,11 +345,12 @@ async def persist_analysis_results(
 async def get_resume_document(
     user: AuthenticatedUser, resume_id: str
 ) -> Optional[Dict[str, Any]]:
-    """Retrieves raw decoded resume document from Firestore."""
+    """Retrieves raw decoded resume document from Firestore asynchronously."""
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}"}
+    client = get_http_client()
     try:
-        res = requests.get(doc_url, headers=headers, timeout=10)
+        res = await client.get(doc_url, headers=headers)
         if res.status_code == 200:
             return _decode_firestore_doc(res.json())
     except Exception:
@@ -325,12 +361,13 @@ async def get_resume_document(
 async def save_resume_snapshot(
     user: AuthenticatedUser, resume_id: str, resume_data: Dict[str, Any]
 ) -> bool:
-    """Saves or updates a resume document with its snapshot in Firestore."""
+    """Saves or updates a resume document with its snapshot in Firestore asynchronously."""
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
     fields_body = {"fields": _encode_firestore_fields(resume_data)}
+    client = get_http_client()
     try:
-        res = requests.patch(doc_url, headers=headers, json=fields_body, timeout=10)
+        res = await client.patch(doc_url, headers=headers, json=fields_body)
         return res.status_code in (200, 201)
     except Exception as e:
         print(f"Error saving resume snapshot: {e}")

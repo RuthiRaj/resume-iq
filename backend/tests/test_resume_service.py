@@ -1,5 +1,7 @@
 import pytest
+from unittest.mock import AsyncMock, MagicMock
 from fastapi import HTTPException
+import httpx
 from app.core.auth import AuthenticatedUser
 from app.services.resume_service import (
     _decode_firestore_value,
@@ -7,6 +9,8 @@ from app.services.resume_service import (
     _encode_firestore_value,
     _encode_firestore_fields,
     get_candidate_resume_data,
+    load_master_profile,
+    get_http_client,
 )
 
 
@@ -87,8 +91,9 @@ async def test_get_candidate_resume_data_snapshot_priority(monkeypatch):
         def json(self):
             return mock_doc
 
-    import requests
-    monkeypatch.setattr(requests, "get", lambda url, headers, timeout: MockResponse())
+    mock_client = AsyncMock()
+    mock_client.get.return_value = MockResponse()
+    monkeypatch.setattr("app.services.resume_service.get_http_client", lambda: mock_client)
 
     evidence = await get_candidate_resume_data(user=user_a, resume_id="resume_999")
     assert evidence.headline == "Lead Architect"
@@ -106,10 +111,64 @@ async def test_get_candidate_resume_data_not_found_raises_404(monkeypatch):
         def json(self):
             return {"error": "Document not found"}
 
-    import requests
-    monkeypatch.setattr(requests, "get", lambda url, headers, timeout: Mock404Response())
+    mock_client = AsyncMock()
+    mock_client.get.return_value = Mock404Response()
+    monkeypatch.setattr("app.services.resume_service.get_http_client", lambda: mock_client)
 
     with pytest.raises(HTTPException) as exc_info:
         await get_candidate_resume_data(user=user_b, resume_id="nonexistent_or_other_user_res")
     assert exc_info.value.status_code == 404
     assert "not found or is inaccessible" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_load_master_profile_concurrent_execution(monkeypatch):
+    user = AuthenticatedUser(uid="user_c_789", token="token_c")
+
+    profile_json = {
+        "fields": {
+            "headline": {"stringValue": "Cloud Architect"},
+            "summary": {"stringValue": "Scalable systems builder"},
+        }
+    }
+    experience_json = {
+        "documents": [
+            {
+                "fields": {
+                    "role": {"stringValue": "DevOps Lead"},
+                    "company": {"stringValue": "Fintech Inc"},
+                    "bullets": {
+                        "arrayValue": {
+                            "values": [{"stringValue": "Managed multi-region Kubernetes clusters."}]
+                        }
+                    },
+                }
+            }
+        ]
+    }
+    empty_subcollection = {"documents": []}
+
+    async def mock_get(url, headers=None):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        if "profile/main" in url:
+            mock_resp.json.return_value = profile_json
+        elif "experience" in url:
+            mock_resp.json.return_value = experience_json
+        else:
+            mock_resp.json.return_value = empty_subcollection
+        return mock_resp
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = mock_get
+    monkeypatch.setattr("app.services.resume_service.get_http_client", lambda: mock_client)
+
+    evidence = await load_master_profile(user)
+
+    assert evidence.headline == "Cloud Architect"
+    assert evidence.summary == "Scalable systems builder"
+    assert len(evidence.experience) == 1
+    assert evidence.experience[0].role == "DevOps Lead"
+    assert evidence.experience[0].bullets == ["Managed multi-region Kubernetes clusters."]
+    # Confirm 6 requests were dispatched
+    assert mock_client.get.call_count == 6
