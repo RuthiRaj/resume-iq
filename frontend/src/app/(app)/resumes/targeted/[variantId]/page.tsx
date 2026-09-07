@@ -60,11 +60,49 @@ export default function TargetedResumeWorkspacePage() {
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
   const [applyRequirementName, setApplyRequirementName] = useState("");
   const [applySection, setApplySection] = useState<"Experience" | "Project">("Experience");
+  const [applyTargetItemId, setApplyTargetItemId] = useState<string>("");
   const [applyTargetBulletIndex, setApplyTargetBulletIndex] = useState(0);
   const [applyApprovedBullet, setApplyApprovedBullet] = useState("");
   const [applyRemediationId, setApplyRemediationId] = useState("");
   const [isApplying, setIsApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
+
+  const openApplyModal = (
+    section: "Experience" | "Project" = "Experience",
+    targetItemId?: string,
+    targetBulletIdx?: number
+  ) => {
+    setApplyRequirementName("");
+    setApplyApprovedBullet("");
+    setApplySection(section);
+    const available =
+      section === "Experience"
+        ? variant?.snapshot?.experience || []
+        : variant?.snapshot?.projects || [];
+    const defaultId =
+      targetItemId ||
+      (available[0] as any)?.id ||
+      (section === "Experience" ? "exp_0" : "proj_0");
+    setApplyTargetItemId(defaultId);
+    setApplyTargetBulletIndex(
+      typeof targetBulletIdx === "number" ? targetBulletIdx : 0
+    );
+    setApplyError(null);
+    setIsApplyModalOpen(true);
+  };
+
+  const handleSectionChange = (section: "Experience" | "Project") => {
+    setApplySection(section);
+    const available =
+      section === "Experience"
+        ? variant?.snapshot?.experience || []
+        : variant?.snapshot?.projects || [];
+    const defaultId =
+      (available[0] as any)?.id ||
+      (section === "Experience" ? "exp_0" : "proj_0");
+    setApplyTargetItemId(defaultId);
+    setApplyTargetBulletIndex(0);
+  };
 
   // Revert Confirmation Dialog State
   const [revertingChange, setRevertingChange] = useState<ChangeRecord | null>(null);
@@ -144,6 +182,10 @@ export default function TargetedResumeWorkspacePage() {
 
     try {
       const idToken = await user.getIdToken();
+      const targetId =
+        applyTargetItemId ||
+        (applySection === "Experience" ? "exp_0" : "proj_0");
+
       const res = await fetch(`/api/variants/${variantId}/apply-change`, {
         method: "POST",
         headers: {
@@ -153,7 +195,7 @@ export default function TargetedResumeWorkspacePage() {
         body: JSON.stringify({
           requirementName: applyRequirementName.trim() || "Target Requirement",
           section: applySection,
-          targetItemId: applySection === "Experience" ? "exp_0" : "proj_0",
+          targetItemId: targetId,
           targetBulletIndex: Math.max(0, applyTargetBulletIndex),
           approvedBullet: applyApprovedBullet.trim(),
           remediationId: applyRemediationId.trim() || undefined,
@@ -522,13 +564,7 @@ export default function TargetedResumeWorkspacePage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                setApplyRequirementName("");
-                setApplyApprovedBullet("");
-                setApplySection("Experience");
-                setApplyTargetBulletIndex(0);
-                setIsApplyModalOpen(true);
-              }}
+              onClick={() => openApplyModal("Experience")}
               className="gap-1.5"
             >
               <Plus className="h-4 w-4" />
@@ -559,11 +595,23 @@ export default function TargetedResumeWorkspacePage() {
                           <strong className="text-body font-semibold text-primary">{exp.role}</strong>
                           <span className="text-secondary"> &mdash; {exp.company}</span>
                         </div>
-                        {(exp.startDate || exp.endDate) && (
-                          <span className="text-caption text-muted">
-                            {exp.startDate} – {exp.isCurrent ? "Present" : exp.endDate}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {(exp.startDate || exp.endDate) && (
+                            <span className="text-caption text-muted">
+                              {exp.startDate} – {exp.isCurrent ? "Present" : exp.endDate}
+                            </span>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openApplyModal("Experience", (exp as any).id || `exp_${idx}`, exp.bullets.length)}
+                            className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
+                            title="Add or edit bullet for this position"
+                          >
+                            <Plus className="h-3 w-3" />
+                            <span>Add Bullet</span>
+                          </Button>
+                        </div>
                       </div>
 
                       <ul className="list-disc list-outside ml-5 space-y-1.5 text-body text-secondary">
@@ -577,14 +625,25 @@ export default function TargetedResumeWorkspacePage() {
                           return (
                             <li
                               key={bIdx}
-                              className={isModified ? "text-primary font-medium bg-status-success-soft/50 p-1.5 rounded -ml-1.5 border-l-2 border-status-success" : ""}
+                              className={`group ${isModified ? "text-primary font-medium bg-status-success-soft/50 p-1.5 rounded -ml-1.5 border-l-2 border-status-success" : ""}`}
                             >
-                              {b}
-                              {isModified && (
-                                <Badge variant="success" className="ml-2 text-[10px] py-0 px-1.5 align-middle">
-                                  Applied in v{variant.version}
-                                </Badge>
-                              )}
+                              <div className="inline">
+                                <span>{b}</span>
+                                {isModified && (
+                                  <Badge variant="success" className="ml-2 text-[10px] py-0 px-1.5 align-middle">
+                                    Applied in v{variant.version}
+                                  </Badge>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openApplyModal("Experience", (exp as any).id || `exp_${idx}`, bIdx)}
+                                  className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-caption text-muted hover:text-accent inline-flex items-center gap-0.5 align-middle"
+                                  title="Modify this bullet"
+                                >
+                                  <Sparkles className="h-3 w-3" />
+                                  <span className="text-[10px]">Edit</span>
+                                </button>
+                              </div>
                             </li>
                           );
                         })}
@@ -615,8 +674,20 @@ export default function TargetedResumeWorkspacePage() {
                   {snapshot.projects.map((proj, idx) => (
                     <div key={idx} className="space-y-1.5">
                       <div className="flex items-center justify-between">
-                        <strong className="text-body font-semibold text-primary">{proj.title}</strong>
-                        {proj.role && <span className="text-caption text-muted">{proj.role}</span>}
+                        <div>
+                          <strong className="text-body font-semibold text-primary">{proj.title}</strong>
+                          {proj.role && <span className="text-caption text-muted ml-2">({proj.role})</span>}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openApplyModal("Project", (proj as any).id || `proj_${idx}`, proj.highlights.length)}
+                          className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
+                          title="Add or edit highlight for this project"
+                        >
+                          <Plus className="h-3 w-3" />
+                          <span>Add Highlight</span>
+                        </Button>
                       </div>
                       {proj.description && <p className="text-small text-secondary">{proj.description}</p>}
                       <ul className="list-disc list-outside ml-5 space-y-1 text-body text-secondary">
@@ -630,14 +701,25 @@ export default function TargetedResumeWorkspacePage() {
                           return (
                             <li
                               key={hlIdx}
-                              className={isModified ? "text-primary font-medium bg-status-success-soft/50 p-1.5 rounded -ml-1.5 border-l-2 border-status-success" : ""}
+                              className={`group ${isModified ? "text-primary font-medium bg-status-success-soft/50 p-1.5 rounded -ml-1.5 border-l-2 border-status-success" : ""}`}
                             >
-                              {hl}
-                              {isModified && (
-                                <Badge variant="success" className="ml-2 text-[10px] py-0 px-1.5 align-middle">
-                                  Applied in v{variant.version}
-                                </Badge>
-                              )}
+                              <div className="inline">
+                                <span>{hl}</span>
+                                {isModified && (
+                                  <Badge variant="success" className="ml-2 text-[10px] py-0 px-1.5 align-middle">
+                                    Applied in v{variant.version}
+                                  </Badge>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => openApplyModal("Project", (proj as any).id || `proj_${idx}`, hlIdx)}
+                                  className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-caption text-muted hover:text-accent inline-flex items-center gap-0.5 align-middle"
+                                  title="Modify this highlight"
+                                >
+                                  <Sparkles className="h-3 w-3" />
+                                  <span className="text-[10px]">Edit</span>
+                                </button>
+                              </div>
                             </li>
                           );
                         })}
@@ -950,29 +1032,115 @@ export default function TargetedResumeWorkspacePage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-small font-medium text-primary">Target Section</label>
-                <select
-                  value={applySection}
-                  onChange={(e) => setApplySection(e.target.value as "Experience" | "Project")}
-                  className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary"
-                >
-                  <option value="Experience">Experience</option>
-                  <option value="Project">Project</option>
-                </select>
-              </div>
+            {/* Section, Entry & Bullet Selection */}
+            {(() => {
+              const availableItems =
+                applySection === "Experience"
+                  ? snapshot?.experience || []
+                  : snapshot?.projects || [];
 
-              <div className="space-y-1.5">
-                <label className="text-small font-medium text-primary">Bullet Index</label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={applyTargetBulletIndex}
-                  onChange={(e) => setApplyTargetBulletIndex(parseInt(e.target.value) || 0)}
-                />
-              </div>
-            </div>
+              const currentItem =
+                availableItems.find(
+                  (it: any, idx: number) =>
+                    it.id === applyTargetItemId ||
+                    applyTargetItemId === `${applySection === "Experience" ? "exp" : "proj"}_${idx}` ||
+                    (idx === 0 && !applyTargetItemId)
+                ) || availableItems[0];
+
+              const currentBullets: string[] =
+                applySection === "Experience"
+                  ? (currentItem as any)?.bullets || []
+                  : (currentItem as any)?.highlights || [];
+
+              const isAppending = applyTargetBulletIndex >= currentBullets.length;
+              const originalBulletPreview = !isAppending && currentBullets[applyTargetBulletIndex];
+
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-small font-medium text-primary">Target Section</label>
+                      <select
+                        value={applySection}
+                        onChange={(e) => handleSectionChange(e.target.value as "Experience" | "Project")}
+                        className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary"
+                      >
+                        <option value="Experience">Experience</option>
+                        <option value="Project">Project</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-small font-medium text-primary">Target Entry</label>
+                      {availableItems.length > 0 ? (
+                        <select
+                          value={applyTargetItemId || (applySection === "Experience" ? "exp_0" : "proj_0")}
+                          onChange={(e) => {
+                            setApplyTargetItemId(e.target.value);
+                            setApplyTargetBulletIndex(0);
+                          }}
+                          className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary truncate"
+                        >
+                          {availableItems.map((it: any, idx: number) => {
+                            const val = it.id || `${applySection === "Experience" ? "exp" : "proj"}_${idx}`;
+                            const label =
+                              applySection === "Experience"
+                                ? `${it.role || "Role"} — ${it.company || "Company"}`
+                                : it.title || `Project ${idx + 1}`;
+                            return (
+                              <option key={val} value={val}>
+                                {idx + 1}. {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      ) : (
+                        <div className="h-9 px-3 py-1.5 rounded-btn border border-border bg-page/50 text-caption text-muted flex items-center">
+                          Default entry will be initialized
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-small font-medium text-primary">Target Bullet</label>
+                      <span className="text-caption text-muted">
+                        {isAppending
+                          ? `Appending new bullet #${currentBullets.length + 1}`
+                          : `Modifying bullet #${applyTargetBulletIndex + 1}`}
+                      </span>
+                    </div>
+
+                    <select
+                      value={applyTargetBulletIndex}
+                      onChange={(e) => setApplyTargetBulletIndex(parseInt(e.target.value, 10) || 0)}
+                      className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary truncate"
+                    >
+                      {currentBullets.map((b: string, bIdx: number) => (
+                        <option key={bIdx} value={bIdx}>
+                          Bullet {bIdx + 1}: {b.length > 65 ? b.slice(0, 65) + "..." : b}
+                        </option>
+                      ))}
+                      <option value={currentBullets.length}>
+                        + Append as new bullet (Index {currentBullets.length})
+                      </option>
+                    </select>
+                  </div>
+
+                  {originalBulletPreview && (
+                    <div className="p-2.5 rounded bg-muted/10 border border-border/70 space-y-1">
+                      <span className="text-caption font-semibold uppercase text-muted">
+                        Current Bullet Text:
+                      </span>
+                      <p className="text-caption text-secondary italic">
+                        &ldquo;{originalBulletPreview}&rdquo;
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="space-y-1.5">
               <label className="text-small font-medium text-primary">Approved Bullet Text</label>

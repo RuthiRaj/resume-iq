@@ -29,7 +29,14 @@ export async function GET(
 
   const searchParams = req.nextUrl.searchParams;
   const rawFormat = searchParams.get("format") || "markdown";
-  const format = ["markdown", "plain_text", "json"].includes(rawFormat) ? rawFormat : "markdown";
+  let format = "markdown";
+  if (rawFormat === "plain_text" || rawFormat === "text") {
+    format = "plain_text";
+  } else if (rawFormat === "json") {
+    format = "json";
+  } else {
+    format = "markdown";
+  }
 
   const targetUrl = `${BACKEND_API_URL.replace(/\/+$/, "")}/api/v1/variants/${variantId}/export?format=${encodeURIComponent(format)}`;
 
