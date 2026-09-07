@@ -9,3 +9,4 @@ python-dotenv>=1.0.1
 httpx>=0.28.0
 pyjwt[crypto]>=2.9.0
 requests>=2.32.0
+mcp[cli]>=2.1.1

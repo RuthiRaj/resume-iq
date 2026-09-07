@@ -33,8 +33,15 @@ export default function DocumentsPage() {
   const [isSimulatingParse, setIsSimulatingParse] = useState(false);
   const [parseProgress, setParseProgress] = useState(0);
   const [parseMessage, setParseMessage] = useState("");
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleSimulatedUpload = () => {
+    if (!uploadFile) {
+      setUploadError("Please select a document file (.pdf, .docx, .doc, or .txt) to upload.");
+      return;
+    }
+
+    setUploadError(null);
     setIsSimulatingParse(true);
     setParseProgress(20);
     setParseMessage("Reading document binary structure...");
@@ -50,26 +57,32 @@ export default function DocumentsPage() {
     }, 1600);
 
     setTimeout(async () => {
-      setParseProgress(100);
-      setParseMessage("Document uploaded and parsed successfully!");
+      try {
+        setParseProgress(100);
+        setParseMessage("Document uploaded and parsed successfully!");
 
-      const fileName = uploadFile ? uploadFile.name : `Career_Document_${Date.now().toString().slice(-4)}.pdf`;
-      await addDocument(
-        {
-          name: fileName,
-          type: docType,
-          fileSize: uploadFile ? `${(uploadFile.size / 1024).toFixed(0)} KB` : "165 KB",
-          uploadDate: new Date().toISOString().split("T")[0],
-          parsedStatus: "Parsed",
-          content: `Extracted text from ${fileName}: Verified credentials, coursework, projects, and work history indexed into master workspace.`,
-        },
-        uploadFile || undefined
-      );
+        const fileName = uploadFile.name;
+        await addDocument(
+          {
+            name: fileName,
+            type: docType,
+            fileSize: `${(uploadFile.size / 1024).toFixed(0)} KB`,
+            uploadDate: new Date().toISOString().split("T")[0],
+            parsedStatus: "Parsed",
+            content: `Extracted text from ${fileName}: Verified credentials, coursework, projects, and work history indexed into master workspace.`,
+          },
+          uploadFile
+        );
 
-      setIsSimulatingParse(false);
-      setUploadFile(null);
-      setIsUploadOpen(false);
-      setParseProgress(0);
+        setIsSimulatingParse(false);
+        setUploadFile(null);
+        setIsUploadOpen(false);
+        setParseProgress(0);
+      } catch (err: any) {
+        setUploadError(err.message || "Failed to upload document.");
+        setIsSimulatingParse(false);
+        setParseProgress(0);
+      }
     }, 2400);
   };
 
@@ -201,6 +214,12 @@ export default function DocumentsPage() {
             />
           </div>
 
+          {uploadError && (
+            <div className="rounded-btn border border-status-error/30 bg-status-error-soft p-3 text-status-error text-small">
+              {uploadError}
+            </div>
+          )}
+
           {/* Parse Simulation Bar */}
           {isSimulatingParse && (
             <div className="space-y-2 rounded-btn border border-accent/20 bg-accent-soft p-4">
@@ -225,14 +244,17 @@ export default function DocumentsPage() {
               type="button"
               variant="ghost"
               disabled={isSimulatingParse}
-              onClick={() => setIsUploadOpen(false)}
+              onClick={() => {
+                setIsUploadOpen(false);
+                setUploadError(null);
+              }}
             >
               Cancel
             </Button>
             <Button
               type="button"
               variant="primary"
-              disabled={isSimulatingParse}
+              disabled={isSimulatingParse || !uploadFile}
               onClick={handleSimulatedUpload}
               className="gap-1.5"
             >
@@ -249,11 +271,11 @@ export default function DocumentsPage() {
           isOpen={true}
           onClose={() => setSelectedDoc(null)}
           title={`Document: ${selectedDoc.name}`}
-          description={`Uploaded on ${selectedDoc.uploadDate} &bull; Status: ${selectedDoc.parsedStatus}`}
+          description={`Uploaded on ${selectedDoc.uploadDate} • Status: ${selectedDoc.parsedStatus}`}
           maxWidth="3xl"
         >
           <div className="space-y-4">
-            {/* Visual simulated document page view */}
+            {/* Visual document preview */}
             <div className="rounded-btn border border-border bg-page p-6 font-mono text-small text-secondary space-y-3">
               <div className="flex items-center justify-between border-b border-border pb-3 text-primary font-semibold">
                 <span>DOCUMENT PREVIEW & EXTRACTION BUFFER</span>
@@ -261,19 +283,13 @@ export default function DocumentsPage() {
               </div>
 
               <div className="space-y-2 text-primary">
-                <p className="font-semibold text-body">Ruthiraj Gosula — Full Stack Engineer</p>
+                <p className="font-semibold text-body">{selectedDoc.name}</p>
                 <p className="text-secondary">
-                  San Francisco, CA &bull; ruthiraj.gosula@example.com &bull; +1 (555) 382-9104
+                  Type: {selectedDoc.type} • Size: {selectedDoc.fileSize}
                 </p>
-                <p className="text-secondary pt-2">
-                  EDUCATION: University of California, Berkeley &mdash; B.S. in Computer Science & Data Intelligence (GPA: 3.88 / 4.0)
-                </p>
-                <p className="text-secondary">
-                  EXPERIENCE: Apex Scale Technologies &mdash; Senior Software Engineer (Next.js, TypeScript, GraphQL)
-                </p>
-                <p className="text-secondary">
-                  CERTIFICATIONS: AWS Certified Solutions Architect Associate (ID: AWS-SAA-8829104)
-                </p>
+                <div className="text-secondary whitespace-pre-wrap pt-2 font-sans text-small leading-relaxed">
+                  {selectedDoc.content || "Document parsed and indexed into master workspace."}
+                </div>
               </div>
             </div>
 

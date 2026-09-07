@@ -731,3 +731,56 @@ async def test_unsupported_variant_section_raises_http_400(monkeypatch, mock_mas
         )
     assert exc_info.value.status_code == 400
     assert "Unsupported variant section" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_create_variant_from_workspace(monkeypatch):
+    """Verifies targeted variant creation directly from candidate's live workspace profile."""
+    doc_store = {}
+
+    async def mock_get_candidate(user, resume_id):
+        assert resume_id == "workspace"
+        return CandidateEvidence(
+            headline="Full Stack Architect",
+            summary="Extensive backend and full stack experience.",
+            experience=[
+                ExperienceItem(id="exp_0", role="Tech Lead", company="ScaleAI", bullets=["Led API core."])
+            ],
+            projects=[
+                ProjectItem(id="proj_0", title="SearchEngine", highlights=["Vector indexing."])
+            ],
+            skills=[SkillItem(name="Python", category="Technical", proficiency="Expert")],
+        )
+
+    async def mock_save(user, resume_id, data):
+        doc_store[resume_id] = data
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", mock_get_candidate)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+
+    user = AuthenticatedUser(uid="usr_workspace_1", token="tok_ws")
+    variant = await VariantService.create_targeted_variant(
+        user,
+        CreateTargetedVariantRequest(
+            master_resume_id="workspace",
+            target_role="Principal AI Engineer",
+            target_company="OpenAI",
+            job_description="Seeking a Principal AI Engineer to lead agentic workflows and distributed systems.",
+        ),
+    )
+
+    assert variant.variant_id.startswith("var_")
+    assert variant.master_resume_id == "workspace"
+    assert variant.target_role == "Principal AI Engineer"
+    assert variant.target_company == "OpenAI"
+    assert variant.job_description.startswith("Seeking a Principal")
+    assert len(variant.snapshot.experience) == 1
+    assert variant.snapshot.experience[0].role == "Tech Lead"
+    assert variant.version == 1
+    assert variant.is_targeted_variant is True
+
+    # Check persistence payload
+    saved_doc = doc_store[variant.variant_id]
+    assert saved_doc["template"] == "ats"
+    assert saved_doc["jobDescription"].startswith("Seeking a Principal")

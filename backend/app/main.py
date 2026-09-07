@@ -8,6 +8,7 @@ from app.api.router import api_v1_router
 from app.api.v1.health import router as health_router
 from app.services.resume_service import close_http_client
 from app.ai.providers.groq_provider import close_groq_client
+from app.mcp.mcp_server import mcp_app
 
 
 @asynccontextmanager
@@ -63,6 +64,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Mount Routers
 app.include_router(health_router, prefix="")  # Direct GET /health
 app.include_router(api_v1_router, prefix="/api")  # /api/v1/...
+
+# Mount MCP server (Streamable HTTP transport, stateless)
+# AI agents connect via: POST /mcp with Authorization: Bearer <Firebase_ID_Token>
+app.mount("/mcp", mcp_app)
 
 
 @app.get("/", tags=["System"])

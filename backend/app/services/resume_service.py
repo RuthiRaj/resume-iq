@@ -76,7 +76,10 @@ def _decode_firestore_value(val: Any) -> Any:
 def _decode_firestore_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Decodes all fields in a Firestore REST document."""
     fields = doc.get("fields", {})
-    return {k: _decode_firestore_value(v) for k, v in fields.items()}
+    res = {k: _decode_firestore_value(v) for k, v in fields.items()}
+    if "id" not in res and "name" in doc:
+        res["id"] = doc["name"].split("/")[-1]
+    return res
 
 
 def _encode_firestore_value(val: Any) -> Dict[str, Any]:
@@ -155,6 +158,7 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
 
     experience = [
         ExperienceItem(
+            id=d.get("id", f"exp_{i}"),
             role=d.get("role", ""),
             company=d.get("company", ""),
             location=d.get("location", ""),
@@ -163,18 +167,19 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             bullets=d.get("bullets", []),
             technologies=d.get("technologies", []),
         )
-        for d in exp_docs
+        for i, d in enumerate(exp_docs)
     ]
 
     projects = [
         ProjectItem(
+            id=d.get("id", f"proj_{i}"),
             title=d.get("title", ""),
             role=d.get("role", ""),
             description=d.get("description", ""),
             highlights=d.get("highlights", []),
             tech_stack=d.get("techStack", []),
         )
-        for d in proj_docs
+        for i, d in enumerate(proj_docs)
     ]
 
     skills = [

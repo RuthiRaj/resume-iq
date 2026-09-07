@@ -83,12 +83,18 @@ function BuilderContent() {
 
   const handleRegenerateSummary = () => {
     setIsRegeneratingSection("summary");
-    setTimeout(() => {
-      setCustomSummary(
-        `High-impact ${targetRole} with 3+ years engineering scalable cloud services, modern Next.js interfaces, and distributed pipelines. Proven track record boosting core latency metrics and mentoring high-velocity engineering teams at scale.`
-      );
-      setIsRegeneratingSection(null);
-    }, 700);
+    const topSkills = skills.slice(0, 5).map((s) => s.name).join(", ");
+    const expCount = experience.length;
+    const headlinePart = profile.headline ? `${profile.headline}. ` : "";
+    const skillsPart = topSkills ? ` Core technical competencies include ${topSkills}.` : "";
+    const rolePart = targetCompany ? ` targeting ${targetRole} opportunities at ${targetCompany}` : ` specializing as ${targetRole}`;
+
+    const factualSummary = profile.summary && profile.summary.trim().length > 20
+      ? profile.summary
+      : `${headlinePart}Results-driven professional${rolePart}.${skillsPart} Track record across ${expCount} professional engagements delivering high-quality engineering outcomes.`;
+
+    setCustomSummary(factualSummary);
+    setIsRegeneratingSection(null);
   };
 
   const handleSaveResume = async () => {
@@ -128,10 +134,10 @@ function BuilderContent() {
         targetCompany,
         template: activeTemplate,
         lastEdited: new Date().toISOString().split("T")[0],
-        score: 95,
-        atsScore: 95,
-        scoreBreakdown: { relevance: 95, keywords: 95, metrics: 95, formatting: 95 },
-        tags: ["Tailored", targetCompany || "General"],
+        score: 0,
+        atsScore: 0,
+        scoreBreakdown: { relevance: 0, keywords: 0, metrics: 0, formatting: 0 },
+        tags: ["Draft", targetCompany || "General"],
         sections: {
           summary: customSummary,
           experiences: selectedExpIds,

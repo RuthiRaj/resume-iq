@@ -64,7 +64,9 @@ export default function DashboardPage() {
   const { user } = useAuth();
 
   // Calculate real ATS average score based only on resumes that have an actual score
-  const scoredResumes = resumes.filter((r) => typeof r.atsScore === "number" || typeof r.score === "number");
+  const scoredResumes = resumes.filter(
+    (r) => ((r.atsScore ?? 0) > 0 || (r.score ?? 0) > 0) && !!r.lastAnalyzedAt
+  );
   const avgAtsScore =
     scoredResumes.length > 0
       ? Math.round(scoredResumes.reduce((acc, r) => acc + (r.atsScore || r.score || 0), 0) / scoredResumes.length)

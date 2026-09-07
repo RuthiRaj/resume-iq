@@ -133,7 +133,7 @@ export default function ResumesPage() {
             size="sm"
             onClick={() => {
               const firstMaster = resumes.find((r) => !r.isTargetedVariant) || resumes[0];
-              setSelectedMasterId(firstMaster ? firstMaster.id : "");
+              setSelectedMasterId(firstMaster ? firstMaster.id : "workspace");
               setVariantRole("");
               setVariantCompany("");
               setVariantJobDesc("");
@@ -464,6 +464,7 @@ export default function ResumesPage() {
                 onChange={(e) => setSelectedMasterId(e.target.value)}
                 className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary"
               >
+                <option value="workspace">Master Career Workspace Profile (Live)</option>
                 {resumes.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.title} ({r.targetRole || "General"})

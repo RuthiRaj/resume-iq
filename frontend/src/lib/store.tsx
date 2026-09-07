@@ -236,6 +236,8 @@ export interface TargetedResumeVariant {
   target_role?: string;
   targetCompany?: string;
   target_company?: string;
+  jobDescription?: string;
+  job_description?: string;
   jobDescriptionHash?: string;
   job_description_hash?: string;
   version: number;
@@ -313,6 +315,7 @@ export interface ResumeItem {
   lastAnalyzedAt?: string;
   isTargetedVariant?: boolean;
   masterResumeId?: string;
+  jobDescription?: string;
   jobDescriptionHash?: string;
   version?: number;
   baselineScore?: number;

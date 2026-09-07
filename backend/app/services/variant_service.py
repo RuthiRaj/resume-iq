@@ -91,14 +91,28 @@ def _resolve_target_item(
     )
 
 
-def _parse_candidate_evidence_from_snapshot(snap_raw: Optional[Dict[str, Any]]) -> CandidateEvidence:
+def _parse_candidate_evidence_from_snapshot(snap_raw: Optional[Any]) -> CandidateEvidence:
     """Parses raw Firestore resume snapshot into a strongly-typed CandidateEvidence model."""
+    if isinstance(snap_raw, CandidateEvidence):
+        return snap_raw
     if not isinstance(snap_raw, dict):
         return CandidateEvidence()
 
     profile = snap_raw.get("profile") or {}
-    experiences = [ExperienceItem.model_validate(e) for e in snap_raw.get("experience", [])]
-    projects = [ProjectItem.model_validate(p) for p in snap_raw.get("projects", [])]
+    experiences: List[ExperienceItem] = []
+    for i, e in enumerate(snap_raw.get("experience", [])):
+        item = ExperienceItem.model_validate(e)
+        if not item.id:
+            item.id = f"exp_{i}"
+        experiences.append(item)
+
+    projects: List[ProjectItem] = []
+    for i, p in enumerate(snap_raw.get("projects", [])):
+        item = ProjectItem.model_validate(p)
+        if not item.id:
+            item.id = f"proj_{i}"
+        projects.append(item)
+
     skills = [SkillItem.model_validate(s) for s in snap_raw.get("skills", [])]
     education = [EducationItem.model_validate(ed) for ed in snap_raw.get("education", [])]
     certifications = [CertificationItem.model_validate(c) for c in snap_raw.get("certifications", [])]
@@ -127,23 +141,42 @@ class VariantService:
         """
         Creates an independent, immutable snapshot fork of a master resume for a specific job target.
         Enforces user ownership and prevents variant-of-variant chaining.
+        Supports both saved resume documents and the user's live master 'workspace' evidence.
         """
         # 1. Fetch and verify ownership of source master resume
-        source_doc = await ResumeService.get_resume_document(user, req.master_resume_id)
-        if not source_doc:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Master resume with ID '{req.master_resume_id}' not found or inaccessible.",
-            )
+        if req.master_resume_id == "workspace":
+            candidate_evidence = await ResumeService.get_candidate_resume_data(user, "workspace")
+            root_master_id = "workspace"
+            baseline_score = None
+            baseline_breakdown = None
+            baseline_matches = []
+            source_template = "ats"
+        else:
+            source_doc = await ResumeService.get_resume_document(user, req.master_resume_id)
+            if not source_doc:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Master resume with ID '{req.master_resume_id}' not found or inaccessible.",
+                )
 
-        # Prevent variant-of-variant chaining: resolve back to root master resume
-        root_master_id = req.master_resume_id
-        if source_doc.get("isTargetedVariant") and source_doc.get("masterResumeId"):
-            root_master_id = source_doc["masterResumeId"]
+            # Prevent variant-of-variant chaining: resolve back to root master resume
+            root_master_id = req.master_resume_id
+            if source_doc.get("isTargetedVariant") and source_doc.get("masterResumeId"):
+                root_master_id = source_doc["masterResumeId"]
 
-        # 2. Extract strongly-typed candidate snapshot
-        snapshot_dict = source_doc.get("snapshot") or {}
-        candidate_evidence = _parse_candidate_evidence_from_snapshot(snapshot_dict)
+            # 2. Extract strongly-typed candidate snapshot
+            snapshot_dict = source_doc.get("snapshot") or {}
+            candidate_evidence = _parse_candidate_evidence_from_snapshot(snapshot_dict)
+
+            # Baseline scores and matches from source doc analysis
+            baseline_score = source_doc.get("atsScore") or source_doc.get("score")
+            baseline_breakdown = source_doc.get("scoreBreakdown")
+            analysis_res = source_doc.get("analysisResults") or {}
+            raw_matches = analysis_res.get("requirementMatches") or []
+            baseline_matches = [
+                RequirementMatch.model_validate(m) for m in raw_matches if isinstance(m, dict) and m.get("requirementName")
+            ]
+            source_template = source_doc.get("template", "ats")
 
         # 3. Derive deterministic job description hash (normalizing CRLF and line whitespace)
         normalized_jd = "\n".join(line.rstrip() for line in req.job_description.strip().splitlines())
@@ -153,15 +186,6 @@ class VariantService:
         variant_id = f"var_{uuid.uuid4().hex[:12]}"
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # Baseline scores and matches from source doc analysis
-        baseline_score = source_doc.get("atsScore") or source_doc.get("score")
-        baseline_breakdown = source_doc.get("scoreBreakdown")
-        analysis_res = source_doc.get("analysisResults") or {}
-        raw_matches = analysis_res.get("requirementMatches") or []
-        baseline_matches = [
-            RequirementMatch.model_validate(m) for m in raw_matches if isinstance(m, dict) and m.get("requirementName")
-        ]
-
         title = f"Targeted: {req.target_role}" + (f" @ {req.target_company}" if req.target_company else "")
 
         variant = TargetedResumeVariant(
@@ -170,6 +194,7 @@ class VariantService:
             title=title,
             target_role=req.target_role,
             target_company=req.target_company or "",
+            job_description=req.job_description,
             job_description_hash=jd_hash,
             version=1,
             is_targeted_variant=True,
@@ -191,8 +216,9 @@ class VariantService:
         # Also include top-level compatibility fields expected by frontend
         doc_payload["score"] = baseline_score or 0
         doc_payload["atsScore"] = baseline_score or 0
-        doc_payload["template"] = source_doc.get("template", "ats")
+        doc_payload["template"] = source_template
         doc_payload["lastEdited"] = now_iso
+        doc_payload["jobDescription"] = req.job_description
 
         saved = await ResumeService.save_resume_snapshot(user, variant_id, doc_payload)
         if not saved:
@@ -223,8 +249,9 @@ class VariantService:
             )
 
         # Parse snapshot into strongly-typed CandidateEvidence
-        doc["snapshot"] = _parse_candidate_evidence_from_snapshot(doc.get("snapshot"))
-        return TargetedResumeVariant.model_validate(doc)
+        doc_copy = dict(doc)
+        doc_copy["snapshot"] = _parse_candidate_evidence_from_snapshot(doc.get("snapshot"))
+        return TargetedResumeVariant.model_validate(doc_copy)
 
     @staticmethod
     async def apply_change_to_variant(

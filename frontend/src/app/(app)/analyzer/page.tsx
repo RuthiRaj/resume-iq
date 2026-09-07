@@ -142,6 +142,7 @@ function AnalyzerContent() {
         }
         if (found.targetRole) setJobTitle(found.targetRole);
         if (found.targetCompany) setJobCompany(found.targetCompany);
+        if (found.jobDescription) setJobDescription(found.jobDescription);
 
         if (found.analysisResults) {
           setSummaryFeedback(found.analysisResults.summaryFeedback || "");
@@ -257,7 +258,7 @@ function AnalyzerContent() {
 
     try {
       const idToken = await user.getIdToken();
-      const masterId = selectedResumeId === "workspace" ? (resumes[0]?.id || "workspace") : selectedResumeId;
+      const masterId = selectedResumeId;
 
       const res = await fetch("/api/variants/create", {
         method: "POST",

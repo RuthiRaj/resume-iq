@@ -47,6 +47,7 @@ class TargetedResumeVariant(BaseModel):
     title: str
     target_role: str = Field(..., alias="targetRole")
     target_company: Optional[str] = Field(default="", alias="targetCompany")
+    job_description: Optional[str] = Field(default="", alias="jobDescription")
     job_description_hash: str = Field(..., alias="jobDescriptionHash")
     version: int = Field(default=1, ge=1)
     is_targeted_variant: bool = Field(default=True, alias="isTargetedVariant")
