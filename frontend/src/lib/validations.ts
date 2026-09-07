@@ -1,16 +1,16 @@
 import { z } from "zod";
 
 export const ProfileSchema = z.object({
-  fullName: z.string().min(2, "Full name is required"),
-  headline: z.string().min(3, "Professional headline is required"),
-  email: z.string().email("Invalid email address"),
-  phone: z.string().min(7, "Valid phone number is required"),
-  location: z.string().min(2, "Location is required"),
-  website: z.string().url("Invalid URL").or(z.literal("")).optional(),
-  linkedin: z.string().url("Invalid LinkedIn URL").or(z.literal("")).optional(),
-  github: z.string().url("Invalid GitHub URL").or(z.literal("")).optional(),
-  summary: z.string().min(20, "Summary should be at least 20 characters"),
-  targetRoles: z.array(z.string()).min(1, "At least one target role is required"),
+  fullName: z.string().default(""),
+  headline: z.string().default(""),
+  email: z.string().email("Invalid email address").or(z.literal("")).default(""),
+  phone: z.string().default(""),
+  location: z.string().default(""),
+  website: z.string().default(""),
+  linkedin: z.string().default(""),
+  github: z.string().default(""),
+  summary: z.string().default(""),
+  targetRoles: z.array(z.string()).default([]),
 });
 
 export const EducationSchema = z.object({

@@ -10,11 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Save, Plus, X, Globe, Linkedin, Github } from "lucide-react";
+import { CheckCircle2, Save, Plus, X, Globe, Linkedin, Github, RefreshCw, AlertCircle } from "lucide-react";
 
 export default function ProfilePage() {
   const { profile, updateProfile } = useCareer();
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [targetRoleInput, setTargetRoleInput] = useState("");
 
   const {
@@ -30,10 +32,10 @@ export default function ProfilePage() {
   });
 
   React.useEffect(() => {
-    if (profile) {
+    if (profile && !isDirty) {
       reset(profile);
     }
-  }, [profile, reset]);
+  }, [profile, reset, isDirty]);
 
   const targetRoles = watch("targetRoles") || [];
 
@@ -53,15 +55,37 @@ export default function ProfilePage() {
     );
   };
 
-  const onSubmit = (data: ProfileData) => {
-    updateProfile(data);
-    setSavedSuccess(true);
-    setTimeout(() => setSavedSuccess(false), 3000);
+  const onSubmit = async (data: ProfileData) => {
+    setIsSaving(true);
+    setSaveError(null);
+
+    // If a target role was typed in but not yet added via button, include it
+    let finalRoles = [...(data.targetRoles || [])];
+    if (targetRoleInput.trim() && !finalRoles.includes(targetRoleInput.trim())) {
+      finalRoles.push(targetRoleInput.trim());
+      setTargetRoleInput("");
+      setValue("targetRoles", finalRoles);
+    }
+    const payload: ProfileData = {
+      ...data,
+      targetRoles: finalRoles,
+    };
+
+    try {
+      await updateProfile(payload);
+      reset(payload);
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 4000);
+    } catch (err: any) {
+      setSaveError(err.message || "Failed to save profile changes. Please try again.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Personal & Contact Profile</h2>
           <p className="text-small text-secondary">
@@ -70,9 +94,16 @@ export default function ProfilePage() {
         </div>
 
         {savedSuccess && (
-          <div className="flex items-center gap-1.5 text-status-success text-small font-medium bg-status-success-soft px-3 py-1.5 rounded-btn border border-status-success/20">
+          <div className="flex items-center gap-1.5 text-status-success text-small font-medium bg-status-success-soft px-3 py-1.5 rounded-btn border border-status-success/20 animate-in fade-in duration-200">
             <CheckCircle2 className="h-4 w-4" />
             <span>Profile saved successfully</span>
+          </div>
+        )}
+
+        {saveError && (
+          <div className="flex items-center gap-1.5 text-status-error text-small font-medium bg-status-error-soft px-3 py-1.5 rounded-btn border border-status-error/20">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>{saveError}</span>
           </div>
         )}
       </div>
@@ -254,9 +285,18 @@ export default function ProfilePage() {
         </Card>
 
         <div className="flex justify-end">
-          <Button type="submit" variant="primary" className="gap-1.5">
-            <Save className="h-4 w-4" />
-            <span>Save Profile Changes</span>
+          <Button type="submit" variant="primary" className="gap-1.5" disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span>Saving Changes...</span>
+              </>
+            ) : (
+              <>
+                <Save className="h-4 w-4" />
+                <span>Save Profile Changes</span>
+              </>
+            )}
           </Button>
         </div>
       </form>

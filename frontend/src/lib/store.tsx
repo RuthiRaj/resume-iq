@@ -572,12 +572,27 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user?.uid]);
 
-  // Firestore CRUD Operations wrapped with useCallback
+  // Profile persistence via backend API proxy
   const updateProfile = useCallback(
     async (data: ProfileData) => {
-      const uid = userRef.current?.uid;
-      if (!uid) return;
-      await setDoc(doc(db, "users", uid, "profile", "main"), data, { merge: true });
+      const user = userRef.current;
+      if (!user) return;
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || err.error || "Failed to update profile.");
+      }
+
+      setProfile(data);
     },
     []
   );
