@@ -7,6 +7,8 @@ from app.services.resume_service import (
 )
 from app.ai.orchestrator import run_ats_analysis
 
+from app.core.rate_limiter import ai_analysis_limiter
+
 router = APIRouter(prefix="/ai", tags=["AI Analyzer"])
 
 
@@ -20,15 +22,9 @@ async def analyze_resume_endpoint(
     request: AnalyzeRequest,
     user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> AnalyzeResponse:
-    """
-    Executes authoritative ATS resume evaluation against a target job description:
-    1. Authenticates caller UID via verified Firebase ID token.
-    2. Resolves candidate evidence from Firestore (/users/{uid}/resumes/{resumeId} or master profile).
-    3. Normalizes candidate evidence and computes SHA-256 JD hash.
-    4. Invokes structured Google Gemini model server-side.
-    5. Persists analysis results to Firestore under /users/{uid}/resumes/{resumeId}.
-    6. Returns structured ATS gap assessment.
-    """
+    # 0. Enforce per-user rate limit on expensive AI analysis
+    await ai_analysis_limiter.check(user.uid)
+
     # 1. Resolve candidate evidence from Firestore strictly scoped to user.uid
     candidate_evidence = await get_candidate_resume_data(
         user=user,

@@ -15,6 +15,7 @@ from app.ai.claim_validator import validate_claims_against_source
 from app.ai.remediation_engine import generate_source_evidence_id
 from app.services.resume_service import ResumeService
 from app.ai.grounding import normalize_for_grounding
+from app.core.rate_limiter import ai_synthesis_limiter
 
 router = APIRouter(prefix="/remediate", tags=["AI Remediation"])
 
@@ -36,6 +37,9 @@ async def synthesize_bullet_endpoint(
     req: SynthesizeBulletRequest,
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> SynthesizeBulletResponse:
+    # Enforce per-user rate limit on AI synthesis
+    await ai_synthesis_limiter.check(current_user.uid)
+
     api_key = settings.GROQ_API_KEY
     if not api_key or api_key.strip() in ("", "your_server_side_groq_api_key_here"):
         raise HTTPException(

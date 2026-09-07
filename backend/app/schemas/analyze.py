@@ -13,7 +13,14 @@ from app.schemas.remediation import RemediationSuggestion
 
 
 class AnalyzeRequest(BaseModel):
-    resume_id: str = Field(..., alias="resumeId", min_length=1, description="Resume ID or 'workspace'")
+    resume_id: str = Field(
+        ...,
+        alias="resumeId",
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+        description="Resume ID or 'workspace'",
+    )
     target_role: str = Field(..., alias="targetRole", min_length=2, max_length=150)
     target_company: Optional[str] = Field(default="", alias="targetCompany", max_length=100)
     job_description: str = Field(

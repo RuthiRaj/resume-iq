@@ -1,3 +1,4 @@
+import re
 import asyncio
 import httpx
 from typing import Dict, Any, Optional, List
@@ -13,6 +14,16 @@ from app.schemas.candidate import (
     CertificationItem,
 )
 from app.schemas.analyze import AnalyzeResponse
+
+
+def _validate_safe_id(val: str, field_name: str = "ID") -> str:
+    """Validates that an identifier contains only safe alphanumeric characters, underscores, or hyphens."""
+    if not val or not re.match(r"^[a-zA-Z0-9_\-]+$", val):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {field_name}: must contain only alphanumeric characters, underscores, or hyphens.",
+        )
+    return val
 
 
 _async_client: Optional[httpx.AsyncClient] = None
@@ -213,6 +224,7 @@ async def get_candidate_resume_data(
     if resume_id == "workspace":
         return await load_master_profile(user)
 
+    _validate_safe_id(resume_id, "resume ID")
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}"}
     client = get_http_client()
@@ -309,6 +321,7 @@ async def persist_analysis_results(
     if resume_id == "workspace":
         return
 
+    _validate_safe_id(resume_id, "resume ID")
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
     client = get_http_client()
@@ -346,6 +359,7 @@ async def get_resume_document(
     user: AuthenticatedUser, resume_id: str
 ) -> Optional[Dict[str, Any]]:
     """Retrieves raw decoded resume document from Firestore asynchronously."""
+    _validate_safe_id(resume_id, "resume ID")
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}"}
     client = get_http_client()
@@ -362,6 +376,7 @@ async def save_resume_snapshot(
     user: AuthenticatedUser, resume_id: str, resume_data: Dict[str, Any]
 ) -> bool:
     """Saves or updates a resume document with its snapshot in Firestore asynchronously."""
+    _validate_safe_id(resume_id, "resume ID")
     doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/resumes/{resume_id}"
     headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
     fields_body = {"fields": _encode_firestore_fields(resume_data)}

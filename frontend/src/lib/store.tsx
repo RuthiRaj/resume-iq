@@ -777,7 +777,27 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       let storagePath = "";
 
       if (file) {
-        const sanitizedName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+        // Enforce maximum file size (15MB)
+        const MAX_FILE_SIZE = 15 * 1024 * 1024;
+        if (file.size > MAX_FILE_SIZE) {
+          throw new Error("File exceeds maximum allowed size of 15MB.");
+        }
+
+        // Enforce allowed document formats and reject dangerous scripts/executables
+        const lowerName = file.name.toLowerCase();
+        const allowedExtensions = [".pdf", ".docx", ".doc", ".txt"];
+        const isAllowed = allowedExtensions.some((ext) => lowerName.endsWith(ext));
+        if (!isAllowed) {
+          throw new Error("Invalid file type. Supported document formats: PDF, DOCX, DOC, TXT.");
+        }
+
+        const prohibitedExtensions = [".exe", ".sh", ".bat", ".cmd", ".js", ".html", ".htm", ".svg", ".php", ".vbs", ".py"];
+        if (prohibitedExtensions.some((ext) => lowerName.endsWith(ext))) {
+          throw new Error("Executable or script files are strictly prohibited.");
+        }
+
+        const cleanBaseName = file.name.replace(/^.*[\\\/]/, "").replace(/[^a-zA-Z0-9.-]/g, "_");
+        const sanitizedName = `${Date.now()}_${cleanBaseName}`;
         storagePath = `users/${currentUser.uid}/documents/${sanitizedName}`;
         const fileRef = ref(storage, storagePath);
         await uploadBytesResumable(fileRef, file);

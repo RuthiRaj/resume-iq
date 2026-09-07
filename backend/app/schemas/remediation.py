@@ -121,10 +121,10 @@ class RemediationSuggestion(BaseModel):
 
 
 class SynthesizeBulletRequest(BaseModel):
-    requirement_name: str = Field(..., alias="requirementName")
+    requirement_name: str = Field(..., alias="requirementName", min_length=1, max_length=200)
     candidate_fact: str = Field(..., alias="candidateFact", min_length=5, max_length=1000)
-    target_role: Optional[str] = Field(default="", alias="targetRole")
-    job_context: Optional[str] = Field(default="", alias="jobContext")
+    target_role: Optional[str] = Field(default="", alias="targetRole", max_length=150)
+    job_context: Optional[str] = Field(default="", alias="jobContext", max_length=2000)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -139,15 +139,15 @@ class SynthesizeBulletResponse(BaseModel):
 
 
 class ApplyRemediationRequest(BaseModel):
-    resume_id: str = Field(..., alias="resumeId")
-    remediation_id: str = Field(..., alias="remediationId")
-    source_evidence_id: str = Field(..., alias="sourceEvidenceId")
+    resume_id: str = Field(..., alias="resumeId", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_\-]+$")
+    remediation_id: str = Field(..., alias="remediationId", min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_\-]+$")
+    source_evidence_id: str = Field(..., alias="sourceEvidenceId", max_length=100)
     target_section: EvidenceSourceSection = Field(..., alias="targetSection")
-    target_experience_id: Optional[str] = Field(default="", alias="targetExperienceId")
-    target_bullet_index: Optional[int] = Field(default=None, alias="targetBulletIndex")
-    approved_bullet: str = Field(..., alias="approvedBullet", min_length=5, max_length=600)
-    target_role: Optional[str] = Field(default="", alias="targetRole")
-    target_company: Optional[str] = Field(default="", alias="targetCompany")
+    target_experience_id: Optional[str] = Field(default="", alias="targetExperienceId", max_length=100)
+    target_bullet_index: Optional[int] = Field(default=None, ge=0, le=1000, alias="targetBulletIndex")
+    approved_bullet: str = Field(..., alias="approvedBullet", min_length=5, max_length=1000)
+    target_role: Optional[str] = Field(default="", alias="targetRole", max_length=150)
+    target_company: Optional[str] = Field(default="", alias="targetCompany", max_length=150)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
