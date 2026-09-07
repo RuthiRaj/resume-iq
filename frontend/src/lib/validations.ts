@@ -1,16 +1,38 @@
 import { z } from "zod";
 
+const safeUrlSchema = z
+  .string()
+  .max(500, "URL cannot exceed 500 characters")
+  .refine(
+    (val) => {
+      if (!val || !val.trim()) return true;
+      const lower = val.trim().toLowerCase();
+      if (
+        lower.startsWith("javascript:") ||
+        lower.startsWith("data:") ||
+        lower.startsWith("vbscript:") ||
+        lower.startsWith("file:") ||
+        lower.startsWith("blob:") ||
+        lower.startsWith("about:")
+      ) {
+        return false;
+      }
+      return true;
+    },
+    { message: "Invalid or unsafe URL scheme." }
+  );
+
 export const ProfileSchema = z.object({
-  fullName: z.string().default(""),
-  headline: z.string().default(""),
+  fullName: z.string().max(150, "Full name cannot exceed 150 characters").default(""),
+  headline: z.string().max(200, "Headline cannot exceed 200 characters").default(""),
   email: z.string().email("Invalid email address").or(z.literal("")).default(""),
-  phone: z.string().default(""),
-  location: z.string().default(""),
-  website: z.string().default(""),
-  linkedin: z.string().default(""),
-  github: z.string().default(""),
-  summary: z.string().default(""),
-  targetRoles: z.array(z.string()).default([]),
+  phone: z.string().max(50, "Phone number cannot exceed 50 characters").default(""),
+  location: z.string().max(150, "Location cannot exceed 150 characters").default(""),
+  website: safeUrlSchema.default(""),
+  linkedin: safeUrlSchema.default(""),
+  github: safeUrlSchema.default(""),
+  summary: z.string().max(5000, "Summary cannot exceed 5000 characters").default(""),
+  targetRoles: z.array(z.string().max(100)).max(30).default([]),
 });
 
 export const EducationSchema = z.object({

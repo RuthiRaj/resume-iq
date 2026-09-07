@@ -1,4 +1,4 @@
-﻿import pytest
+import pytest
 from unittest.mock import AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 from app.main import app
@@ -136,3 +136,95 @@ def test_profile_endpoints(override_auth, monkeypatch):
     assert post_data["success"] is True
     assert post_data["profile"]["website"] == "https://alexmorgan.tech"
     assert post_data["profile"]["targetRoles"] == ["Principal Architect", "VP Engineering"]
+
+
+def test_unauthenticated_profile_requests():
+    """Unauthenticated requests must strictly return 401."""
+    client = TestClient(app)
+    r_get = client.get("/api/v1/profile")
+    assert r_get.status_code == 401
+
+    r_post = client.post("/api/v1/profile", json={"fullName": "Attacker"})
+    assert r_post.status_code == 401
+
+
+def test_profile_dangerous_url_validation(override_auth):
+    """Dangerous URL schemes must be rejected with 400 Bad Request."""
+    client = TestClient(app)
+
+    dangerous_payloads = [
+        {"website": "javascript:alert(1)"},
+        {"website": "JAVASCRIPT:alert(1)"},
+        {"linkedin": "data:text/html,<script>alert(1)</script>"},
+        {"github": "vbscript:msgbox(1)"},
+        {"website": "file:///etc/passwd"},
+        {"website": "http://example.com/<script>"},
+    ]
+
+    for payload in dangerous_payloads:
+        res = client.post("/api/v1/profile", json=payload)
+        assert res.status_code in (400, 422), f"Expected 400/422 for payload {payload}, got {res.status_code}"
+        assert "Validation failed" in res.json().get("error", "") or "detail" in res.json()
+
+
+def test_profile_string_length_and_target_roles_validation(override_auth):
+    """Excessive string lengths and bounded target roles array must be enforced."""
+    client = TestClient(app)
+
+    # Excessive full name (> 150 chars)
+    res = client.post("/api/v1/profile", json={"fullName": "A" * 151})
+    assert res.status_code in (400, 422)
+
+    # Excessive summary (> 5000 chars)
+    res = client.post("/api/v1/profile", json={"summary": "B" * 5001})
+    assert res.status_code in (400, 422)
+
+    # Excessive target roles array (> 30 items)
+    roles = [f"Role {i}" for i in range(35)]
+    res = client.post("/api/v1/profile", json={"targetRoles": roles})
+    assert res.status_code in (400, 422)
+
+    # Target role item > 100 chars
+    res = client.post("/api/v1/profile", json={"targetRoles": ["C" * 101]})
+    assert res.status_code in (400, 422)
+
+    # Invalid email format
+    res = client.post("/api/v1/profile", json={"email": "not-an-email"})
+    assert res.status_code in (400, 422)
+
+
+@pytest.mark.asyncio
+async def test_user_isolation_and_updatemask(monkeypatch):
+    """Verifies that Firestore document path strictly uses authenticated UID and includes updateMask."""
+    user_a = AuthenticatedUser(uid="user_A_111", email="a@test.com", token="token_A")
+    user_b = AuthenticatedUser(uid="user_B_222", email="b@test.com", token="token_B")
+
+    captured_urls = []
+
+    mock_client = AsyncMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "fields": {
+            "fullName": {"stringValue": "User A"},
+            "targetRoles": {"arrayValue": {"values": []}},
+        }
+    }
+
+    async def mock_patch(url, **kwargs):
+        captured_urls.append(url)
+        return mock_resp
+
+    mock_client.patch = mock_patch
+    monkeypatch.setattr("app.services.profile_service.get_http_client", lambda: mock_client)
+
+    dto = ProfileDTO(fullName="User A", website="https://usera.com")
+    await ProfileService.save_profile(user_a, dto)
+
+    assert len(captured_urls) == 1
+    assert "users/user_A_111/profile/main" in captured_urls[0]
+    assert "user_B_222" not in captured_urls[0]
+    assert "updateMask.fieldPaths=" in captured_urls[0]
+    assert "updateMask.fieldPaths=fullName" in captured_urls[0]
+    assert "updateMask.fieldPaths=website" in captured_urls[0]
+

@@ -589,7 +589,17 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || err.error || "Failed to update profile.");
+        let message = "Failed to update profile.";
+        if (typeof err.detail === "string") {
+          message = err.detail;
+        } else if (Array.isArray(err.detail) && err.detail.length > 0) {
+          message = err.detail
+            .map((e: any) => e.msg || e.message || JSON.stringify(e))
+            .join(", ");
+        } else if (typeof err.error === "string") {
+          message = err.error;
+        }
+        throw new Error(message);
       }
 
       setProfile(data);

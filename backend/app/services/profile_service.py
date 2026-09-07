@@ -43,9 +43,10 @@ class ProfileService:
             except Exception as e:
                 if attempt == 0:
                     continue
+                print(f"Internal error fetching profile for user {user.uid}: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Failed to fetch profile: {str(e)}",
+                    detail="Failed to retrieve profile due to an internal error.",
                 )
 
         return ProfileDTO(
@@ -72,11 +73,14 @@ class ProfileService:
         if not payload_dict.get("email") and user.email:
             payload_dict["email"] = user.email
 
+        # Form updateMask to update only the specific fields in payload without erasing other document properties
+        mask_params = [f"updateMask.fieldPaths={k}" for k in payload_dict.keys()]
+        patch_url = f"{doc_url}?{'&'.join(mask_params)}"
         fields_body = {"fields": _encode_firestore_fields(payload_dict)}
 
         for attempt in range(2):
             try:
-                res = await client.patch(doc_url, headers=headers, json=fields_body, timeout=25.0)
+                res = await client.patch(patch_url, headers=headers, json=fields_body, timeout=25.0)
                 if res.status_code in (200, 201):
                     decoded = _decode_firestore_doc(res.json())
                     saved_profile = ProfileDTO.model_validate(decoded)
@@ -103,7 +107,8 @@ class ProfileService:
             except Exception as e:
                 if attempt == 0:
                     continue
+                print(f"Internal error saving profile for user {user.uid}: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Error saving profile: {str(e)}",
+                    detail="Failed to save profile due to an internal error.",
                 )
