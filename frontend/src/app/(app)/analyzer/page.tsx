@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useCareer, RequirementMatchData, RemediationSuggestionData } from "@/lib/store";
 import { useAuth } from "@/lib/auth-context";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -32,6 +33,8 @@ import {
   Send,
   RefreshCw,
   PlusCircle,
+  GitBranch,
+  ExternalLink,
 } from "lucide-react";
 
 interface SkillRequirementData {
@@ -112,6 +115,10 @@ function AnalyzerContent() {
   const [synthesizingId, setSynthesizingId] = useState<string | null>(null);
   const [applyingId, setApplyingId] = useState<string | null>(null);
   const [targetedResumeId, setTargetedResumeId] = useState<string | null>(null);
+
+  const router = useRouter();
+  const [isForkingVariant, setIsForkingVariant] = useState(false);
+  const [forkVariantError, setForkVariantError] = useState<string | null>(null);
 
   // Automatically restore saved analysis when selecting an analyzed resume
   const lastLoadedKeyRef = useRef<string | null>(null);
@@ -231,6 +238,51 @@ function AnalyzerContent() {
       setErrorMessage(err.message || "Failed to analyze resume. Please try again.");
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const handleForkTargetedVariant = async () => {
+    if (!user) {
+      setErrorMessage("Please sign in to fork a targeted variant.");
+      return;
+    }
+
+    if (!jobDescription || jobDescription.trim().length < 30) {
+      setErrorMessage("Job description must be at least 30 characters to create a targeted variant.");
+      return;
+    }
+
+    setIsForkingVariant(true);
+    setForkVariantError(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const masterId = selectedResumeId === "workspace" ? (resumes[0]?.id || "workspace") : selectedResumeId;
+
+      const res = await fetch("/api/variants/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          masterResumeId: masterId,
+          targetRole: jobTitle.trim() || "Target Role",
+          targetCompany: jobCompany.trim() || "",
+          jobDescription: jobDescription.trim(),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || "Failed to create targeted variant.");
+      }
+
+      router.push(`/resumes/targeted/${data.variantId}`);
+    } catch (err: any) {
+      setForkVariantError(err.message || "Failed to fork targeted variant.");
+    } finally {
+      setIsForkingVariant(false);
     }
   };
 
@@ -523,6 +575,60 @@ function AnalyzerContent() {
         </Card>
       ) : (
         <div className="space-y-6 animate-in fade-in-50 duration-300">
+          {/* Phase 5.4 Targeted Resume Workspace Callout Banner */}
+          <Card className="border-accent/40 bg-gradient-to-r from-accent-soft/30 via-surface to-accent-soft/20 shadow-sm">
+            <CardContent className="p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-btn bg-accent text-accent-foreground shadow-sm">
+                  <GitBranch className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-body font-semibold text-primary flex items-center gap-2">
+                    Targeted Resume Workspace
+                    <Badge variant="accent" className="text-[10px] font-semibold uppercase tracking-wider">Phase 5.4</Badge>
+                  </h3>
+                  <p className="text-small text-secondary mt-0.5">
+                    Fork an isolated, immutable variant for <span className="font-medium text-primary">{jobTitle || "this role"}</span>{jobCompany ? ` at ${jobCompany}` : ""}. Track bullet versions, fit progression, and export without modifying your master resume.
+                  </p>
+                  {forkVariantError && (
+                    <p className="text-caption text-status-danger mt-1 font-medium">{forkVariantError}</p>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                {targetedResumeId ? (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 shadow-sm"
+                    onClick={() => router.push(`/resumes/targeted/${targetedResumeId}`)}
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open Variant Workspace
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    className="gap-1.5 shadow-sm"
+                    onClick={handleForkTargetedVariant}
+                    disabled={isForkingVariant || !jobDescription || jobDescription.trim().length < 30}
+                  >
+                    {isForkingVariant ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Forking Variant...
+                      </>
+                    ) : (
+                      <>
+                        <GitBranch className="h-4 w-4" />
+                        Fork Targeted Variant
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Score Overview Row */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             {/* Overall Large Score Card */}
@@ -852,9 +958,21 @@ function AnalyzerContent() {
                             </span>
                           </span>
                           {isApplied && (
-                            <Badge variant="success" className="text-[10px] gap-1">
-                              <Check className="h-3 w-3" /> Applied to Targeted Resume
-                            </Badge>
+                            <div className="flex items-center gap-1.5">
+                              <Badge variant="success" className="text-[10px] gap-1">
+                                <Check className="h-3 w-3" /> Applied to Targeted Resume
+                              </Badge>
+                              {targetedResumeId && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => router.push(`/resumes/targeted/${targetedResumeId}`)}
+                                  className="h-6 text-[11px] px-2 gap-1 text-accent hover:text-accent-strong hover:bg-accent-soft/30"
+                                >
+                                  <ExternalLink className="h-3 w-3" /> Workspace
+                                </Button>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -904,7 +1022,18 @@ function AnalyzerContent() {
                             </div>
                           )}
 
-                          <div className="flex justify-end pt-1">
+                          <div className="flex justify-end items-center gap-2 pt-1">
+                            {isApplied && targetedResumeId && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => router.push(`/resumes/targeted/${targetedResumeId}`)}
+                                className="text-caption gap-1.5 border-accent/40 text-accent hover:bg-accent-soft/30"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                Open Workspace
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant={isApplied ? "outline" : "primary"}
@@ -966,7 +1095,18 @@ function AnalyzerContent() {
                                 className="text-small bg-surface focus-visible:ring-accent"
                                 disabled={isApplied}
                               />
-                              <div className="flex justify-end pt-1">
+                              <div className="flex justify-end items-center gap-2 pt-1">
+                                {isApplied && targetedResumeId && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => router.push(`/resumes/targeted/${targetedResumeId}`)}
+                                    className="text-caption gap-1.5 border-accent/40 text-accent hover:bg-accent-soft/30"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                    Open Workspace
+                                  </Button>
+                                )}
                                 <Button
                                   size="sm"
                                   variant={isApplied ? "outline" : "primary"}

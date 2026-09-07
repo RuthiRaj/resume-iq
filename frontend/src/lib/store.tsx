@@ -108,44 +108,179 @@ export interface AnalysisResultData {
 export interface ChangeRecordData {
   id: string;
   remediationId?: string;
+  remediation_id?: string;
   actionType: "ApplyRemediation" | "DirectEdit" | "RevertChange" | "CandidateFactAddition";
+  action_type?: "ApplyRemediation" | "DirectEdit" | "RevertChange" | "CandidateFactAddition";
   requirementName: string;
+  requirement_name?: string;
   section: "Experience" | "Project" | "SkillTag" | "Education" | "Certification" | "Summary" | "None";
   targetItemId: string;
+  target_item_id?: string;
   targetBulletIndex?: number;
+  target_bullet_index?: number;
   originalText?: string;
+  original_text?: string;
   proposedText?: string;
+  proposed_text?: string;
   approvedText: string;
+  approved_text?: string;
   status: "Draft" | "Approved" | "Applied" | "Reverted";
   versionIntroduced: number;
+  version_introduced?: number;
   versionReverted?: number;
+  version_reverted?: number;
   appliedAt: string;
+  applied_at?: string;
   revertedAt?: string;
+  reverted_at?: string;
   revertedChangeId?: string;
+  reverted_change_id?: string;
 }
 
 export interface RequirementProgressionData {
   requirementName: string;
+  requirement_name?: string;
   category: string;
   importance: "MustHave" | "Preferred" | "Unspecified";
   baselineStatus: "StrongMatch" | "PartialMatch" | "Missing";
+  baseline_status?: "StrongMatch" | "PartialMatch" | "Missing";
   currentStatus: "StrongMatch" | "PartialMatch" | "Missing";
+  current_status?: "StrongMatch" | "PartialMatch" | "Missing";
   progression: "Resolved" | "Improved" | "Unchanged" | "UnresolvedHardGap";
   verifiedEvidence?: string;
+  verified_evidence?: string;
 }
 
 export interface FitComparisonData {
   variantId: string;
+  variant_id?: string;
   targetRole: string;
+  target_role?: string;
   targetCompany?: string;
+  target_company?: string;
   baselineScore: number;
+  baseline_score?: number;
   currentScore: number;
+  current_score?: number;
   scoreDelta: number;
+  score_delta?: number;
   baselineBreakdown: { relevance: number; keywords: number; metrics: number; formatting: number };
+  baseline_breakdown?: { relevance: number; keywords: number; metrics: number; formatting: number };
   currentBreakdown: { relevance: number; keywords: number; metrics: number; formatting: number };
+  current_breakdown?: { relevance: number; keywords: number; metrics: number; formatting: number };
   requirementProgressions: RequirementProgressionData[];
+  requirement_progressions?: RequirementProgressionData[];
   totalGapsResolved: number;
+  total_gaps_resolved?: number;
   totalGapsRemaining: number;
+  total_gaps_remaining?: number;
+}
+
+export interface CandidateEvidenceData {
+  headline?: string;
+  summary?: string;
+  experience?: Array<{
+    role: string;
+    company: string;
+    location?: string;
+    startDate?: string;
+    endDate?: string;
+    isCurrent?: boolean;
+    bullets: string[];
+    technologies?: string[];
+  }>;
+  projects?: Array<{
+    title: string;
+    role?: string;
+    startDate?: string;
+    endDate?: string;
+    description?: string;
+    highlights: string[];
+    techStack?: string[];
+    liveUrl?: string;
+    repoUrl?: string;
+  }>;
+  skills?: Array<{
+    name: string;
+    category?: string;
+    proficiency?: string;
+    yearsOfExperience?: number;
+  }>;
+  education?: Array<{
+    institution: string;
+    degree?: string;
+    fieldOfStudy?: string;
+    startDate?: string;
+    endDate?: string;
+    grade?: string;
+    activities?: string;
+    courses?: string[];
+  }>;
+  certifications?: Array<{
+    title: string;
+    issuer?: string;
+    issueDate?: string;
+    expiryDate?: string;
+    credentialId?: string;
+    credentialUrl?: string;
+  }>;
+}
+
+export interface TargetedResumeVariant {
+  variantId: string;
+  variant_id?: string;
+  masterResumeId: string;
+  master_resume_id?: string;
+  title: string;
+  targetRole: string;
+  target_role?: string;
+  targetCompany?: string;
+  target_company?: string;
+  jobDescriptionHash?: string;
+  job_description_hash?: string;
+  version: number;
+  isTargetedVariant?: boolean;
+  is_targeted_variant?: boolean;
+  baselineScore?: number;
+  baseline_score?: number;
+  baselineBreakdown?: { relevance: number; keywords: number; metrics: number; formatting: number };
+  baseline_breakdown?: { relevance: number; keywords: number; metrics: number; formatting: number };
+  baselineMatches?: RequirementMatchData[];
+  baseline_matches?: RequirementMatchData[];
+  currentScore?: number;
+  current_score?: number;
+  currentBreakdown?: { relevance: number; keywords: number; metrics: number; formatting: number };
+  current_breakdown?: { relevance: number; keywords: number; metrics: number; formatting: number };
+  currentMatches?: RequirementMatchData[];
+  current_matches?: RequirementMatchData[];
+  scoreDelta?: number;
+  score_delta?: number;
+  snapshot: CandidateEvidenceData;
+  changeLedger?: ChangeRecordData[];
+  change_ledger?: ChangeRecordData[];
+  createdAt?: string;
+  created_at?: string;
+  updatedAt?: string;
+  updated_at?: string;
+}
+
+export type ChangeRecord = ChangeRecordData;
+export type RequirementProgression = RequirementProgressionData;
+export type FitComparisonResponse = FitComparisonData;
+
+export interface ExportTargetedResumeResponse {
+  variantId: string;
+  variant_id?: string;
+  title: string;
+  targetRole: string;
+  target_role?: string;
+  targetCompany?: string;
+  target_company?: string;
+  version: number;
+  format: string;
+  content: string;
+  exportedAt: string;
+  exported_at?: string;
 }
 
 export interface ResumeItem {
