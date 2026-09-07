@@ -811,7 +811,8 @@ async def resource_export(ctx: Context, variant_id: str, fmt: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# ASGI app for mounting into FastAPI
+# ASGI app for mounting into FastAPI (SSE transport)
 # ---------------------------------------------------------------------------
 
-mcp_app = mcp.streamable_http_app(stateless_http=True)
+mcp_app = mcp.sse_app()
+
