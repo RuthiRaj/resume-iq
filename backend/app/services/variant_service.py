@@ -1,3 +1,4 @@
+import re
 import uuid
 import hashlib
 from datetime import datetime, timezone
@@ -25,6 +26,69 @@ from app.schemas.variant import (
 from app.schemas.requirement_match import RequirementMatch
 from app.services.resume_service import ResumeService
 from app.ai.remediation_engine import generate_source_evidence_id
+
+
+def _validate_safe_id(val: str, field_name: str = "ID") -> str:
+    """Validates that an identifier contains only safe alphanumeric characters, underscores, or hyphens."""
+    if not val or not re.match(r"^[a-zA-Z0-9_\-]+$", val):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid {field_name}: must contain only alphanumeric characters, underscores, or hyphens.",
+        )
+    return val
+
+
+def _resolve_target_item(
+    items: List[Any],
+    target_item_id: str,
+    section_name: str,
+) -> Tuple[Any, int]:
+    """
+    Resolves a specific ExperienceItem or ProjectItem within candidate evidence.
+    Supports formats:
+      - Explicit id matching (item.id == target_item_id)
+      - Prefixed index matching ('exp_0', 'exp_1', 'proj_0', 'proj_1')
+      - Direct index matching ('0', '1', '2')
+    Raises HTTPException(404) if item cannot be resolved or index is out of bounds.
+    """
+    if not items:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Target section '{section_name}' has no entries to modify.",
+        )
+
+    # 1. Direct ID match if item has an id attribute
+    for idx, item in enumerate(items):
+        if getattr(item, "id", None) and item.id == target_item_id:
+            return item, idx
+
+    # 2. Extract numeric index from 'exp_N', 'proj_N', or 'N'
+    parsed_idx = None
+    clean_id = target_item_id.strip()
+    if "_" in clean_id:
+        parts = clean_id.split("_")
+        suffix = parts[-1]
+        if suffix.isdigit():
+            parsed_idx = int(suffix)
+    elif clean_id.isdigit():
+        parsed_idx = int(clean_id)
+
+    if parsed_idx is not None:
+        if 0 <= parsed_idx < len(items):
+            return items[parsed_idx], parsed_idx
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Target item index {parsed_idx} is out of bounds for section '{section_name}' (contains {len(items)} items).",
+        )
+
+    # 3. Fallback: if there is only 1 item and default target_item_id was passed, return it safely
+    if len(items) == 1 and clean_id in ("exp_0", "proj_0", "0", ""):
+        return items[0], 0
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail=f"Unable to resolve target item '{target_item_id}' in section '{section_name}'.",
+    )
 
 
 def _parse_candidate_evidence_from_snapshot(snap_raw: Optional[Dict[str, Any]]) -> CandidateEvidence:
@@ -81,8 +145,9 @@ class VariantService:
         snapshot_dict = source_doc.get("snapshot") or {}
         candidate_evidence = _parse_candidate_evidence_from_snapshot(snapshot_dict)
 
-        # 3. Derive deterministic job description hash
-        jd_hash = hashlib.sha256(req.job_description.strip().encode("utf-8")).hexdigest()
+        # 3. Derive deterministic job description hash (normalizing CRLF and line whitespace)
+        normalized_jd = "\n".join(line.rstrip() for line in req.job_description.strip().splitlines())
+        jd_hash = hashlib.sha256(normalized_jd.encode("utf-8")).hexdigest()
 
         # 4. Generate stable variant ID
         variant_id = f"var_{uuid.uuid4().hex[:12]}"
@@ -144,6 +209,7 @@ class VariantService:
         variant_id: str,
     ) -> TargetedResumeVariant:
         """Loads and strongly-types a targeted resume variant owned by the authenticated user."""
+        _validate_safe_id(variant_id, "variant_id")
         doc = await ResumeService.get_resume_document(user, variant_id)
         if not doc:
             raise HTTPException(
@@ -169,13 +235,30 @@ class VariantService:
         """
         Applies an approved modification to a targeted resume variant.
         Enforces stable source anchor, increments version (v1 -> v2), and records to change ledger.
+        Guarantees item-resolution safety and optimistic concurrency protection.
         """
+        _validate_safe_id(variant_id, "variant_id")
         variant = await VariantService.get_targeted_variant(user, variant_id)
+
+        # Optimistic concurrency / version conflict check
+        if req.expected_version is not None and variant.version != req.expected_version:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Concurrency conflict: variant is at version {variant.version}, but expected version was {req.expected_version}. Please refresh to see latest changes.",
+            )
+
         candidate_evidence = variant.snapshot
         now_iso = datetime.now(timezone.utc).isoformat()
 
         original_text = ""
         target_bullet_idx = req.target_bullet_index
+        resolved_item_id = req.target_item_id
+
+        if target_bullet_idx is not None and target_bullet_idx < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Target bullet index cannot be negative (got {target_bullet_idx}).",
+            )
 
         # 1. Modify Experience or Project in snapshot
         if req.section == "Experience":
@@ -188,20 +271,30 @@ class VariantService:
                     )
                 )
                 target_bullet_idx = 0
+                resolved_item_id = "exp_0"
             else:
-                exp_item = candidate_evidence.experience[0]
-                if target_bullet_idx is not None and target_bullet_idx < len(exp_item.bullets):
-                    current_bullet = exp_item.bullets[target_bullet_idx]
-                    # Verify source evidence anchor if provided
-                    if req.source_evidence_id:
-                        expected_id = generate_source_evidence_id(req.section, req.target_item_id, current_bullet)
-                        if req.source_evidence_id != expected_id:
-                            raise HTTPException(
-                                status_code=status.HTTP_409_CONFLICT,
-                                detail="Stale change: target bullet has been modified since analysis. Please re-analyze before applying.",
-                            )
-                    original_text = current_bullet
-                    exp_item.bullets[target_bullet_idx] = req.approved_bullet
+                exp_item, item_idx = _resolve_target_item(candidate_evidence.experience, req.target_item_id, "Experience")
+                resolved_item_id = getattr(exp_item, "id", None) or f"exp_{item_idx}"
+                if target_bullet_idx is not None:
+                    if 0 <= target_bullet_idx < len(exp_item.bullets):
+                        current_bullet = exp_item.bullets[target_bullet_idx]
+                        # Verify source evidence anchor if provided
+                        if req.source_evidence_id:
+                            expected_id = generate_source_evidence_id(req.section, req.target_item_id, current_bullet)
+                            if req.source_evidence_id != expected_id:
+                                raise HTTPException(
+                                    status_code=status.HTTP_409_CONFLICT,
+                                    detail="Stale change: target bullet has been modified since analysis. Please re-analyze before applying.",
+                                )
+                        original_text = current_bullet
+                        exp_item.bullets[target_bullet_idx] = req.approved_bullet
+                    elif target_bullet_idx == len(exp_item.bullets):
+                        exp_item.bullets.append(req.approved_bullet)
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Target bullet index {target_bullet_idx} is out of bounds (item has {len(exp_item.bullets)} bullets).",
+                        )
                 else:
                     target_bullet_idx = len(exp_item.bullets)
                     exp_item.bullets.append(req.approved_bullet)
@@ -215,14 +308,29 @@ class VariantService:
                     )
                 )
                 target_bullet_idx = 0
+                resolved_item_id = "proj_0"
             else:
-                proj_item = candidate_evidence.projects[0]
-                if target_bullet_idx is not None and target_bullet_idx < len(proj_item.highlights):
-                    original_text = proj_item.highlights[target_bullet_idx]
-                    proj_item.highlights[target_bullet_idx] = req.approved_bullet
+                proj_item, item_idx = _resolve_target_item(candidate_evidence.projects, req.target_item_id, "Project")
+                resolved_item_id = getattr(proj_item, "id", None) or f"proj_{item_idx}"
+                if target_bullet_idx is not None:
+                    if 0 <= target_bullet_idx < len(proj_item.highlights):
+                        original_text = proj_item.highlights[target_bullet_idx]
+                        proj_item.highlights[target_bullet_idx] = req.approved_bullet
+                    elif target_bullet_idx == len(proj_item.highlights):
+                        proj_item.highlights.append(req.approved_bullet)
+                    else:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Target bullet index {target_bullet_idx} is out of bounds (item has {len(proj_item.highlights)} highlights).",
+                        )
                 else:
                     target_bullet_idx = len(proj_item.highlights)
                     proj_item.highlights.append(req.approved_bullet)
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported variant section '{req.section}'. Variant mutations only support 'Experience' and 'Project' sections.",
+            )
 
         # 2. Increment Version & Create Change Record
         new_version = variant.version + 1
@@ -234,7 +342,7 @@ class VariantService:
             action_type="ApplyRemediation",
             requirement_name=req.requirement_name,
             section=req.section,
-            target_item_id=req.target_item_id,
+            target_item_id=resolved_item_id,
             target_bullet_index=target_bullet_idx,
             original_text=original_text,
             proposed_text=req.approved_bullet,
@@ -273,6 +381,8 @@ class VariantService:
         Reverts an applied change deterministically and idempotently.
         Restores original evidence text, increments version (v2 -> v3), and preserves full ledger history.
         """
+        _validate_safe_id(variant_id, "variant_id")
+        _validate_safe_id(change_id, "change_id")
         variant = await VariantService.get_targeted_variant(user, variant_id)
         now_iso = datetime.now(timezone.utc).isoformat()
 
@@ -303,22 +413,51 @@ class VariantService:
         # 2. Restore the original text in the snapshot
         candidate_evidence = variant.snapshot
 
-        if target_change.section == "Experience" and candidate_evidence.experience:
-            exp_item = candidate_evidence.experience[0]
-            if target_change.target_bullet_index is not None and target_change.target_bullet_index < len(exp_item.bullets):
-                if target_change.original_text:
-                    exp_item.bullets[target_change.target_bullet_index] = target_change.original_text
+        if target_change.section == "Experience":
+            exp_item, _ = _resolve_target_item(candidate_evidence.experience, target_change.target_item_id, "Experience")
+            if target_change.target_bullet_index is not None:
+                b_idx = target_change.target_bullet_index
+                if b_idx < 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Corrupted change record: negative bullet index {b_idx}.",
+                    )
+                if 0 <= b_idx < len(exp_item.bullets):
+                    if target_change.original_text:
+                        exp_item.bullets[b_idx] = target_change.original_text
+                    else:
+                        # If this was an added bullet with no original text, remove the appended bullet
+                        exp_item.bullets.pop(b_idx)
                 else:
-                    # If this was an added bullet with no original text, remove the appended bullet
-                    exp_item.bullets.pop(target_change.target_bullet_index)
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Cannot revert change '{change_id}': target bullet index {b_idx} is out of bounds in current snapshot.",
+                    )
 
-        elif target_change.section == "Project" and candidate_evidence.projects:
-            proj_item = candidate_evidence.projects[0]
-            if target_change.target_bullet_index is not None and target_change.target_bullet_index < len(proj_item.highlights):
-                if target_change.original_text:
-                    proj_item.highlights[target_change.target_bullet_index] = target_change.original_text
+        elif target_change.section == "Project":
+            proj_item, _ = _resolve_target_item(candidate_evidence.projects, target_change.target_item_id, "Project")
+            if target_change.target_bullet_index is not None:
+                b_idx = target_change.target_bullet_index
+                if b_idx < 0:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Corrupted change record: negative bullet index {b_idx}.",
+                    )
+                if 0 <= b_idx < len(proj_item.highlights):
+                    if target_change.original_text:
+                        proj_item.highlights[b_idx] = target_change.original_text
+                    else:
+                        proj_item.highlights.pop(b_idx)
                 else:
-                    proj_item.highlights.pop(target_change.target_bullet_index)
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Cannot revert change '{change_id}': target highlight index {b_idx} is out of bounds in current snapshot.",
+                    )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cannot revert change for unsupported section '{target_change.section}'.",
+            )
 
         # 3. Increment Version and create Revert audit record in ledger
         new_version = variant.version + 1
@@ -386,10 +525,18 @@ class VariantService:
         current_score = variant.current_score or baseline_score
         score_delta = current_score - baseline_score
 
-        baseline_map = {m.requirement_name.lower(): m for m in variant.baseline_matches}
-        current_map = {m.requirement_name.lower(): m for m in variant.current_matches}
+        baseline_map = {
+            m.requirement_name.strip().lower(): m
+            for m in variant.baseline_matches
+            if m.requirement_name and m.requirement_name.strip()
+        }
+        current_map = {
+            m.requirement_name.strip().lower(): m
+            for m in variant.current_matches
+            if m.requirement_name and m.requirement_name.strip()
+        }
 
-        all_req_names = list(set(list(baseline_map.keys()) + list(current_map.keys())))
+        all_req_names = sorted(list(set(list(baseline_map.keys()) + list(current_map.keys()))))
         progressions: List[RequirementProgression] = []
         resolved_count = 0
         remaining_count = 0
@@ -461,6 +608,13 @@ class VariantService:
         Read-only export generator reading strictly from the stored targeted variant snapshot.
         Guarantees 0 mutations, 0 version increments, and 0 ledger alterations.
         """
+        _validate_safe_id(variant_id, "variant_id")
+        if fmt not in ("markdown", "plain_text", "json"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported export format '{fmt}'. Must be markdown, plain_text, or json.",
+            )
+
         variant = await VariantService.get_targeted_variant(user, variant_id)
         candidate = variant.snapshot
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -516,7 +670,11 @@ class VariantService:
                         lines.append(f"*{exp.start_date} – {exp.end_date}*")
                     lines.append("")
                     for b in exp.bullets:
-                        lines.append(f"- {b}")
+                        b_lines = [l.strip() for l in b.strip().splitlines() if l.strip()]
+                        if b_lines:
+                            lines.append(f"- {b_lines[0]}")
+                            for subline in b_lines[1:]:
+                                lines.append(f"  {subline}")
                     lines.append("")
             if candidate.projects:
                 lines.append("## Key Projects")
@@ -525,7 +683,11 @@ class VariantService:
                     if proj.description:
                         lines.append(f"{proj.description}")
                     for hl in proj.highlights:
-                        lines.append(f"- {hl}")
+                        hl_lines = [l.strip() for l in hl.strip().splitlines() if l.strip()]
+                        if hl_lines:
+                            lines.append(f"- {hl_lines[0]}")
+                            for subline in hl_lines[1:]:
+                                lines.append(f"  {subline}")
                     lines.append("")
             if candidate.skills:
                 lines.append("## Core Technical Competencies")

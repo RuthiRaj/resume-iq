@@ -10,6 +10,13 @@ export async function GET(
   { params }: { params: Promise<{ variantId: string }> }
 ) {
   const { variantId } = await params;
+  if (!/^[a-zA-Z0-9_\-]+$/.test(variantId)) {
+    return NextResponse.json(
+      { error: "Invalid variantId format." },
+      { status: 400 }
+    );
+  }
+
   const authHeader =
     req.headers.get("Authorization") || req.headers.get("authorization");
 
@@ -21,7 +28,8 @@ export async function GET(
   }
 
   const searchParams = req.nextUrl.searchParams;
-  const format = searchParams.get("format") || "markdown";
+  const rawFormat = searchParams.get("format") || "markdown";
+  const format = ["markdown", "plain_text", "json"].includes(rawFormat) ? rawFormat : "markdown";
 
   const targetUrl = `${BACKEND_API_URL.replace(/\/+$/, "")}/api/v1/variants/${variantId}/export?format=${encodeURIComponent(format)}`;
 

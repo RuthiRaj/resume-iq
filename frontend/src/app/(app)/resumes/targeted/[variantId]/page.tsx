@@ -134,6 +134,10 @@ export default function TargetedResumeWorkspacePage() {
       setApplyError("Approved bullet text cannot be empty.");
       return;
     }
+    if (applyApprovedBullet.trim().length > 2000) {
+      setApplyError("Approved bullet text exceeds maximum length of 2,000 characters.");
+      return;
+    }
 
     setIsApplying(true);
     setApplyError(null);
@@ -150,16 +154,17 @@ export default function TargetedResumeWorkspacePage() {
           requirementName: applyRequirementName.trim() || "Target Requirement",
           section: applySection,
           targetItemId: applySection === "Experience" ? "exp_0" : "proj_0",
-          targetBulletIndex: applyTargetBulletIndex,
+          targetBulletIndex: Math.max(0, applyTargetBulletIndex),
           approvedBullet: applyApprovedBullet.trim(),
           remediationId: applyRemediationId.trim() || undefined,
+          expectedVersion: variant?.version,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 409) {
-          throw new Error("Conflict: target resume bullet has been altered. Please refresh and re-check before applying.");
+          throw new Error(data.detail || "Conflict: target resume bullet or version has been altered. Please refresh and re-check before applying.");
         }
         throw new Error(data.detail || data.error || "Failed to apply change.");
       }

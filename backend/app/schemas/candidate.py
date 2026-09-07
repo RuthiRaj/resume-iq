@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class ExperienceItem(BaseModel):
+    id: Optional[str] = None
     role: str
     company: str
     location: Optional[str] = ""
@@ -15,6 +16,7 @@ class ExperienceItem(BaseModel):
 
 
 class ProjectItem(BaseModel):
+    id: Optional[str] = None
     title: str
     role: Optional[str] = ""
     description: str = ""

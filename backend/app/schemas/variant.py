@@ -25,13 +25,13 @@ class ChangeRecord(BaseModel):
     requirement_name: str = Field(..., alias="requirementName")
     section: EvidenceSourceSection = Field(default="Experience")
     target_item_id: str = Field(..., alias="targetItemId", description="e.g. exp_0, proj_1")
-    target_bullet_index: Optional[int] = Field(default=None, alias="targetBulletIndex")
+    target_bullet_index: Optional[int] = Field(default=None, ge=0, alias="targetBulletIndex")
     original_text: str = Field(default="", alias="originalText")
     proposed_text: str = Field(default="", alias="proposedText")
     approved_text: str = Field(..., alias="approvedText")
     status: ChangeStatus = Field(default="Applied")
-    version_introduced: int = Field(default=1, alias="versionIntroduced")
-    version_reverted: Optional[int] = Field(default=None, alias="versionReverted")
+    version_introduced: int = Field(default=1, ge=1, alias="versionIntroduced")
+    version_reverted: Optional[int] = Field(default=None, ge=1, alias="versionReverted")
     applied_at: str = Field(..., alias="appliedAt")
     reverted_at: Optional[str] = Field(default=None, alias="revertedAt")
     reverted_change_id: Optional[str] = Field(default=None, alias="revertedChangeId")
@@ -48,7 +48,7 @@ class TargetedResumeVariant(BaseModel):
     target_role: str = Field(..., alias="targetRole")
     target_company: Optional[str] = Field(default="", alias="targetCompany")
     job_description_hash: str = Field(..., alias="jobDescriptionHash")
-    version: int = Field(default=1)
+    version: int = Field(default=1, ge=1)
     is_targeted_variant: bool = Field(default=True, alias="isTargetedVariant")
 
     # Authoritative Persisted Analysis Snapshots
@@ -109,28 +109,42 @@ class FitComparisonResponse(BaseModel):
 # --- 4. API Request / Response Contracts ---
 
 class CreateTargetedVariantRequest(BaseModel):
-    master_resume_id: str = Field(..., alias="masterResumeId")
-    target_role: str = Field(..., alias="targetRole")
-    target_company: Optional[str] = Field(default="", alias="targetCompany")
-    job_description: str = Field(..., alias="jobDescription")
+    master_resume_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+        alias="masterResumeId",
+        description="ID of source master resume",
+    )
+    target_role: str = Field(..., min_length=1, max_length=150, alias="targetRole")
+    target_company: Optional[str] = Field(default="", max_length=150, alias="targetCompany")
+    job_description: str = Field(..., min_length=1, max_length=50000, alias="jobDescription")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class ApplyVariantChangeRequest(BaseModel):
-    remediation_id: Optional[str] = Field(default=None, alias="remediationId")
-    requirement_name: str = Field(..., alias="requirementName")
+    remediation_id: Optional[str] = Field(default=None, max_length=100, alias="remediationId")
+    requirement_name: str = Field(..., min_length=1, max_length=200, alias="requirementName")
     section: EvidenceSourceSection = Field(default="Experience")
-    target_item_id: str = Field(default="exp_0", alias="targetItemId")
-    target_bullet_index: Optional[int] = Field(default=None, alias="targetBulletIndex")
-    approved_bullet: str = Field(..., alias="approvedBullet")
-    source_evidence_id: Optional[str] = Field(default=None, alias="sourceEvidenceId")
+    target_item_id: str = Field(
+        default="exp_0",
+        min_length=1,
+        max_length=50,
+        pattern=r"^[a-zA-Z0-9_\-]+$",
+        alias="targetItemId",
+    )
+    target_bullet_index: Optional[int] = Field(default=None, ge=0, le=1000, alias="targetBulletIndex")
+    approved_bullet: str = Field(..., min_length=1, max_length=2000, alias="approvedBullet")
+    source_evidence_id: Optional[str] = Field(default=None, max_length=64, alias="sourceEvidenceId")
+    expected_version: Optional[int] = Field(default=None, ge=1, alias="expectedVersion")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class RevertChangeRequest(BaseModel):
-    change_id: str = Field(..., alias="changeId")
+    change_id: str = Field(..., min_length=1, max_length=100, pattern=r"^[a-zA-Z0-9_\-]+$", alias="changeId")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 

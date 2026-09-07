@@ -10,6 +10,13 @@ export async function POST(
   { params }: { params: Promise<{ variantId: string }> }
 ) {
   const { variantId } = await params;
+  if (!/^[a-zA-Z0-9_\-]+$/.test(variantId)) {
+    return NextResponse.json(
+      { error: "Invalid variantId format." },
+      { status: 400 }
+    );
+  }
+
   const authHeader =
     req.headers.get("Authorization") || req.headers.get("authorization");
 
