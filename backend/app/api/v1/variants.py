@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status, Response
 from app.core.auth import get_authenticated_user, AuthenticatedUser
 from app.schemas.variant import (
     TargetedResumeVariant,
@@ -97,3 +97,23 @@ async def export_variant_endpoint(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> ExportTargetedResumeResponse:
     return await VariantService.export_targeted_variant_snapshot(current_user, variant_id, fmt=format)
+
+
+@router.get(
+    "/{variant_id}/export/pdf",
+    summary="Read-only PDF export generator reading strictly from the targeted resume snapshot",
+)
+async def export_variant_pdf_endpoint(
+    variant_id: str = Path(..., pattern=VARIANT_ID_PATTERN, description="Variant ID"),
+    template: str = Query("ats", description="PDF template design style"),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> Response:
+    pdf_bytes, filename = await VariantService.export_targeted_variant_pdf(current_user, variant_id, template=template)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+        },
+    )

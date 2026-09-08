@@ -111,10 +111,11 @@ export default function TargetedResumeWorkspacePage() {
 
   // Export Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
-  const [exportFormat, setExportFormat] = useState<"markdown" | "plain_text" | "json">("markdown");
+  const [exportFormat, setExportFormat] = useState<"markdown" | "plain_text" | "json" | "pdf">("pdf");
   const [exportData, setExportData] = useState<ExportTargetedResumeResponse | null>(null);
   const [isExportLoading, setIsExportLoading] = useState(false);
   const [exportCopied, setExportCopied] = useState(false);
+  const [isPdfDownloading, setIsPdfDownloading] = useState(false);
 
   // Fetch variant from backend
   const fetchVariant = useCallback(async (showRefreshing = false) => {
@@ -261,13 +262,18 @@ export default function TargetedResumeWorkspacePage() {
   };
 
   // Handle Export Fetch
-  const handleOpenExport = async (format: "markdown" | "plain_text" | "json" = exportFormat) => {
+  const handleOpenExport = async (format: "markdown" | "plain_text" | "json" | "pdf" = exportFormat) => {
     if (!user || !variantId) return;
     setExportFormat(format);
     setIsExportModalOpen(true);
-    setIsExportLoading(true);
     setExportCopied(false);
 
+    if (format === "pdf") {
+      setIsExportLoading(false);
+      return;
+    }
+
+    setIsExportLoading(true);
     try {
       const idToken = await user.getIdToken();
       const res = await fetch(`/api/variants/${variantId}/export?format=${format}`, {
@@ -283,6 +289,39 @@ export default function TargetedResumeWorkspacePage() {
       console.error("Export error:", err);
     } finally {
       setIsExportLoading(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!user || !variantId) return;
+    setIsPdfDownloading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(`/api/variants/${variantId}/export/pdf?template=ats`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      if (!res.ok) {
+        throw new Error("Failed to download PDF export.");
+      }
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get("content-disposition");
+      let filename = `${variant?.title?.replace(/[^a-zA-Z0-9_-]/g, "_") || "targeted_resume"}_v${variant?.version || 1}.pdf`;
+      if (contentDisposition && contentDisposition.includes("filename=")) {
+        const match = contentDisposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error("PDF download error:", err);
+    } finally {
+      setIsPdfDownloading(false);
     }
   };
 
@@ -402,7 +441,7 @@ export default function TargetedResumeWorkspacePage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleOpenExport("markdown")}
+            onClick={() => handleOpenExport("pdf")}
             className="gap-1.5"
           >
             <Download className="h-3.5 w-3.5 text-secondary" />
@@ -1217,22 +1256,46 @@ export default function TargetedResumeWorkspacePage() {
           <div className="space-y-4">
             {/* Format Picker */}
             <div className="flex items-center gap-2 border-b border-border/60 pb-3">
-              {(["markdown", "plain_text", "json"] as const).map((fmt) => (
+              {(["pdf", "markdown", "plain_text", "json"] as const).map((fmt) => (
                 <Button
                   key={fmt}
                   variant={exportFormat === fmt ? "primary" : "outline"}
                   size="sm"
                   onClick={() => handleOpenExport(fmt)}
-                  disabled={isExportLoading}
+                  disabled={isExportLoading || isPdfDownloading}
                   className="capitalize"
                 >
-                  {fmt.replace("_", " ")}
+                  {fmt === "pdf" ? "ATS PDF" : fmt.replace("_", " ")}
                 </Button>
               ))}
             </div>
 
             {/* Content Preview */}
-            {isExportLoading ? (
+            {exportFormat === "pdf" ? (
+              <div className="p-6 rounded-card border border-border bg-page/40 space-y-5 text-center">
+                <div className="mx-auto w-12 h-12 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
+                  <FileText className="h-6 w-6" />
+                </div>
+                <div className="space-y-1.5 max-w-md mx-auto">
+                  <h3 className="text-h3 font-bold text-primary">ATS-Optimized Vector PDF</h3>
+                  <p className="text-small text-secondary">
+                    Single-column vector layout engineered for 100% compliance with ATS parsers (Workday, Taleo, Greenhouse, Lever). Native selectable text with standard Helvetica typography.
+                  </p>
+                </div>
+                <div className="pt-2 flex justify-center gap-3">
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={handleDownloadPdf}
+                    disabled={isPdfDownloading}
+                    className="gap-2 px-6 shadow-subtle"
+                  >
+                    <Download className={`h-4 w-4 ${isPdfDownloading ? "animate-bounce" : ""}`} />
+                    <span>{isPdfDownloading ? "Generating PDF..." : "Download ATS PDF"}</span>
+                  </Button>
+                </div>
+              </div>
+            ) : isExportLoading ? (
               <LoadingState text="Generating formatted export..." />
             ) : exportData ? (
               <div className="space-y-3">

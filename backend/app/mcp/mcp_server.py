@@ -61,7 +61,7 @@ from app.core.security import sanitize_error_message
 # ---------------------------------------------------------------------------
 
 _SAFE_ID_RE = re.compile(r"^[a-zA-Z0-9_\-]+$")
-_VALID_EXPORT_FORMATS = {"markdown", "plain_text", "json"}
+_VALID_EXPORT_FORMATS = {"markdown", "plain_text", "json", "pdf"}
 
 MAX_JD_LEN = 50_000
 MAX_BULLET_FACT_LEN = 1_000
@@ -652,7 +652,7 @@ async def compare_variant_fit(ctx: Context, variant_id: str) -> dict:
     name="export_targeted_resume",
     description=(
         "Export a targeted resume variant in the specified format. "
-        "Supported formats: 'markdown', 'plain_text', 'json'. "
+        "Supported formats: 'markdown', 'plain_text', 'json', 'pdf'. "
         "Read-only — does not mutate the variant or version ledger."
     ),
 )
@@ -669,6 +669,16 @@ async def export_targeted_resume(
             f"Unsupported export format '{format}'. Must be: {', '.join(sorted(_VALID_EXPORT_FORMATS))}.",
         )
     try:
+        if format == "pdf":
+            pdf_bytes, filename = await VariantService.export_targeted_variant_pdf(user, variant_id, template="ats")
+            import base64
+            return {
+                "variantId": variant_id,
+                "format": "pdf",
+                "filename": filename,
+                "contentBase64": base64.b64encode(pdf_bytes).decode("utf-8"),
+                "mimeType": "application/pdf",
+            }
         result = await VariantService.export_targeted_variant_snapshot(user, variant_id, fmt=format)
         return result.model_dump(by_alias=True)
     except MCPError:

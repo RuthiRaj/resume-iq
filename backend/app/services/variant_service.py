@@ -733,3 +733,78 @@ class VariantService:
             content=content,
             exported_at=now_iso,
         )
+
+    @staticmethod
+    async def export_targeted_variant_pdf(
+        user: AuthenticatedUser,
+        variant_id: str,
+        template: str = "ats",
+    ) -> Tuple[bytes, str]:
+        """
+        Read-only PDF exporter reading strictly from the stored targeted variant snapshot.
+        Renders native vector PDF using ReportLab without modifying master workspace, snapshots,
+        version numbers, or change ledgers.
+        """
+        from app.services.pdf_renderer import ResumeViewModel, AtsTemplateRenderer
+
+        _validate_safe_id(variant_id, "variant_id")
+        variant = await VariantService.get_targeted_variant(user, variant_id)
+        candidate = variant.snapshot
+
+        contact_parts = []
+        if user.email:
+            contact_parts.append(user.email)
+
+        contact_line = " | ".join(contact_parts)
+
+        vm = ResumeViewModel(
+            full_name=candidate.headline or user.email or variant.title,
+            headline=variant.target_role,
+            contact_line=contact_line,
+            summary=candidate.summary or "",
+            experience=[
+                {
+                    "role": exp.role,
+                    "company": exp.company,
+                    "location": exp.location or "",
+                    "date_range": f"{exp.start_date} – {'Present' if exp.end_date == 'Present' else exp.end_date}" if (exp.start_date or exp.end_date) else "",
+                    "bullets": exp.bullets or [],
+                }
+                for exp in (candidate.experience or [])
+            ],
+            projects=[
+                {
+                    "title": proj.title,
+                    "role": proj.role or "",
+                    "description": proj.description or "",
+                    "highlights": proj.highlights or [],
+                }
+                for proj in (candidate.projects or [])
+            ],
+            skills=[s.name for s in (candidate.skills or []) if s.name],
+            education=[
+                {
+                    "degree": edu.degree,
+                    "institution": edu.institution,
+                    "fieldOfStudy": edu.field_of_study or "",
+                }
+                for edu in (candidate.education or [])
+            ],
+            certifications=[
+                {
+                    "title": cert.title,
+                    "issuer": cert.issuer or "",
+                }
+                for cert in (candidate.certifications or [])
+            ],
+            target_role=variant.target_role,
+            target_company=variant.target_company or "",
+        )
+
+        renderer = AtsTemplateRenderer()
+        pdf_bytes = renderer.render(vm)
+
+        clean_role = re.sub(r"[^a-zA-Z0-9_\-]", "_", variant.target_role)[:40] or "Targeted_Resume"
+        filename = f"{clean_role}_v{variant.version}.pdf"
+
+        return pdf_bytes, filename
