@@ -222,7 +222,7 @@ class ResumeGenerationService:
             and not candidate_evidence.skills
         ):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Workspace candidate profile must have at least one experience, project, or skill to generate a resume.",
             )
 
