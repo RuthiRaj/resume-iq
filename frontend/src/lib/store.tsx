@@ -15,7 +15,7 @@ import {
   orderBy,
   serverTimestamp,
 } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref, deleteObject } from "firebase/storage";
 import {
   ProfileData,
   EducationData,
@@ -387,7 +387,7 @@ interface CareerContextType {
   deleteAchievement: (id: string) => Promise<void>;
 
   documents: DocumentData[];
-  addDocument: (data: Omit<DocumentData, "id">, file?: File) => Promise<void>;
+  addDocument: (data: Omit<DocumentData, "id">, fileUrl?: string) => Promise<void>;
   deleteDocument: (id: string, storagePath?: string) => Promise<void>;
 
   resumes: ResumeItem[];
@@ -773,49 +773,22 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addDocument = useCallback(
-    async (data: Omit<DocumentData, "id">, file?: File) => {
+    async (data: Omit<DocumentData, "id">, fileUrl?: string) => {
       const currentUser = userRef.current;
       if (!currentUser?.uid) return;
-      let fileUrl = "";
-      let storagePath = "";
 
-      if (file) {
-        // Enforce maximum file size (15MB)
-        const MAX_FILE_SIZE = 15 * 1024 * 1024;
-        if (file.size > MAX_FILE_SIZE) {
-          throw new Error("File exceeds maximum allowed size of 15MB.");
-        }
-
-        // Enforce allowed document formats and reject dangerous scripts/executables
-        const lowerName = file.name.toLowerCase();
-        const allowedExtensions = [".pdf", ".docx", ".doc", ".txt"];
-        const isAllowed = allowedExtensions.some((ext) => lowerName.endsWith(ext));
-        if (!isAllowed) {
-          throw new Error("Invalid file type. Supported document formats: PDF, DOCX, DOC, TXT.");
-        }
-
-        const prohibitedExtensions = [".exe", ".sh", ".bat", ".cmd", ".js", ".html", ".htm", ".svg", ".php", ".vbs", ".py"];
-        if (prohibitedExtensions.some((ext) => lowerName.endsWith(ext))) {
-          throw new Error("Executable or script files are strictly prohibited.");
-        }
-
-        const cleanBaseName = file.name.replace(/^.*[\\\/]/, "").replace(/[^a-zA-Z0-9.-]/g, "_");
-        const sanitizedName = `${Date.now()}_${cleanBaseName}`;
-        storagePath = `users/${currentUser.uid}/documents/${sanitizedName}`;
-        const fileRef = ref(storage, storagePath);
-        await uploadBytesResumable(fileRef, file);
-        try {
-          fileUrl = await getDownloadURL(fileRef);
-        } catch {
-          // Storage URL placeholder if storage is still initializing
-          fileUrl = "";
-        }
-      }
-
+      // NOTE: the original file is uploaded server-side during ingestion
+      // (backend -> Cloudinary, see app/services/cloud_storage_service.py),
+      // not from the browser. This avoids browser-to-storage CORS entirely
+      // and doesn't require the Firebase Storage Blaze plan. `fileUrl`, if
+      // provided, is the URL the backend already returned; storagePath is
+      // left empty since Firebase Storage is no longer used for new uploads
+      // (deleteDocument below still supports it for any pre-existing docs
+      // that have a storagePath from before this change).
       await addDoc(collection(db, "users", currentUser.uid, "documents"), {
         ...data,
-        fileUrl,
-        storagePath,
+        fileUrl: fileUrl || "",
+        storagePath: "",
         createdAt: new Date().toISOString(),
       });
     },

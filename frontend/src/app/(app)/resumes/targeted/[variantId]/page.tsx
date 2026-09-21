@@ -19,29 +19,55 @@ import { Modal } from "@/components/ui/modal";
 import { LoadingState, EmptyState, ErrorAlert } from "@/components/common/state-views";
 import { formatDate } from "@/lib/utils";
 import {
+  AlertTriangle,
   ArrowLeft,
+  Award,
+  BookOpen,
   Briefcase,
   Building2,
   Calendar,
+  Check,
   CheckCircle2,
+  Code2,
   Copy,
   Download,
   ExternalLink,
   FileCheck,
   FileCode,
   FileText,
+  GraduationCap,
   History,
   Layers,
   ListChecks,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Sparkles,
   TrendingUp,
   Undo2,
+  Wand2,
+  X,
   XCircle,
   Zap,
 } from "lucide-react";
+
+export interface AiEditProposal {
+  originalText: string;
+  proposedText: string;
+  diff: string;
+  validation: {
+    isValid: boolean;
+    status: string;
+    unsupportedClaims?: Array<{ claimText: string; claimType: string; reason?: string }>;
+  };
+  requiresConfirmation: boolean;
+  userAttestedFacts: string[];
+  targetItemId: string;
+  targetBulletIndex?: number;
+  version: number;
+}
 
 export default function TargetedResumeWorkspacePage() {
   const params = useParams();
@@ -55,54 +81,40 @@ export default function TargetedResumeWorkspacePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Apply Change Modal State
+  // Manual Edit Modal State
+  const [isManualEditModalOpen, setIsManualEditModalOpen] = useState(false);
+  const [manualEditSection, setManualEditSection] = useState<"Summary" | "Experience" | "Project">("Experience");
+  const [manualEditTargetItemId, setManualEditTargetItemId] = useState<string>("");
+  const [manualEditTargetBulletIndex, setManualEditTargetBulletIndex] = useState<number | undefined>(undefined);
+  const [manualEditText, setManualEditText] = useState("");
+  const [isSavingManualEdit, setIsSavingManualEdit] = useState(false);
+  const [manualEditError, setManualEditError] = useState<string | null>(null);
+
+  // AI Edit Modal & Proposal State
+  const [isAiEditModalOpen, setIsAiEditModalOpen] = useState(false);
+  const [aiEditSection, setAiEditSection] = useState<"Summary" | "Experience" | "Project">("Experience");
+  const [aiEditTargetItemId, setAiEditTargetItemId] = useState<string>("");
+  const [aiEditTargetBulletIndex, setAiEditTargetBulletIndex] = useState<number | undefined>(undefined);
+  const [aiEditOriginalText, setAiEditOriginalText] = useState("");
+  const [aiEditInstruction, setAiEditInstruction] = useState("");
+  const [isGeneratingProposal, setIsGeneratingProposal] = useState(false);
+  const [aiProposal, setAiProposal] = useState<AiEditProposal | null>(null);
+  const [confirmAttestation, setConfirmAttestation] = useState(false);
+  const [isApplyingProposal, setIsApplyingProposal] = useState(false);
+  const [aiEditError, setAiEditError] = useState<string | null>(null);
+
+  // Apply Direct Change Modal State
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
   const [applyRequirementName, setApplyRequirementName] = useState("");
-  const [applySection, setApplySection] = useState<"Experience" | "Project">("Experience");
+  const [applySection, setApplySection] = useState<"Experience" | "Project" | "Summary">("Experience");
   const [applyTargetItemId, setApplyTargetItemId] = useState<string>("");
   const [applyTargetBulletIndex, setApplyTargetBulletIndex] = useState(0);
   const [applyApprovedBullet, setApplyApprovedBullet] = useState("");
   const [applyRemediationId, setApplyRemediationId] = useState("");
   const [isApplying, setIsApplying] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
-
-  const openApplyModal = (
-    section: "Experience" | "Project" = "Experience",
-    targetItemId?: string,
-    targetBulletIdx?: number
-  ) => {
-    setApplyRequirementName("");
-    setApplyApprovedBullet("");
-    setApplySection(section);
-    const available =
-      section === "Experience"
-        ? variant?.snapshot?.experience || []
-        : variant?.snapshot?.projects || [];
-    const defaultId =
-      targetItemId ||
-      (available[0] as any)?.id ||
-      (section === "Experience" ? "exp_0" : "proj_0");
-    setApplyTargetItemId(defaultId);
-    setApplyTargetBulletIndex(
-      typeof targetBulletIdx === "number" ? targetBulletIdx : 0
-    );
-    setApplyError(null);
-    setIsApplyModalOpen(true);
-  };
-
-  const handleSectionChange = (section: "Experience" | "Project") => {
-    setApplySection(section);
-    const available =
-      section === "Experience"
-        ? variant?.snapshot?.experience || []
-        : variant?.snapshot?.projects || [];
-    const defaultId =
-      (available[0] as any)?.id ||
-      (section === "Experience" ? "exp_0" : "proj_0");
-    setApplyTargetItemId(defaultId);
-    setApplyTargetBulletIndex(0);
-  };
 
   // Revert Confirmation Dialog State
   const [revertingChange, setRevertingChange] = useState<ChangeRecord | null>(null);
@@ -116,6 +128,14 @@ export default function TargetedResumeWorkspacePage() {
   const [isExportLoading, setIsExportLoading] = useState(false);
   const [exportCopied, setExportCopied] = useState(false);
   const [isPdfDownloading, setIsPdfDownloading] = useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   // Fetch variant from backend
   const fetchVariant = useCallback(async (showRefreshing = false) => {
@@ -166,7 +186,284 @@ export default function TargetedResumeWorkspacePage() {
     fetchFitComparison();
   }, [fetchVariant, fetchFitComparison]);
 
-  // Handle Apply Change
+  // Clean up PDF object URL on unmount or format change
+  const cleanupPdfPreview = useCallback(() => {
+    if (pdfPreviewUrl) {
+      URL.revokeObjectURL(pdfPreviewUrl);
+      setPdfPreviewUrl(null);
+    }
+  }, [pdfPreviewUrl]);
+
+  // Handle Export Fetch & PDF Preview Generation
+  const handleOpenExport = async (format: "markdown" | "plain_text" | "json" | "pdf" = exportFormat) => {
+    if (!user || !variantId) return;
+    setExportFormat(format);
+    setIsExportModalOpen(true);
+    setExportCopied(false);
+
+    if (format === "pdf") {
+      setIsExportLoading(false);
+      if (!pdfPreviewUrl) {
+        setIsPdfLoading(true);
+        setPdfPreviewError(null);
+        try {
+          const idToken = await user.getIdToken();
+          const res = await fetch(`/api/variants/${variantId}/export/pdf?template=ats`, {
+            headers: { Authorization: `Bearer ${idToken}` },
+          });
+
+          if (!res.ok) {
+            throw new Error("Failed to generate PDF preview from server.");
+          }
+
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          setPdfPreviewUrl(url);
+        } catch (err: any) {
+          setPdfPreviewError(err.message || "Could not load PDF preview.");
+        } finally {
+          setIsPdfLoading(false);
+        }
+      }
+      return;
+    }
+
+    setIsExportLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(`/api/variants/${variantId}/export?format=${format}`, {
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.error || "Failed to export variant.");
+      }
+      setExportData(data);
+    } catch (err: any) {
+      console.error("Export error:", err);
+    } finally {
+      setIsExportLoading(false);
+    }
+  };
+
+  // --- 1. Manual Edit Handlers ---
+  const openManualEditModal = (
+    section: "Summary" | "Experience" | "Project",
+    itemId: string,
+    bulletIndex?: number,
+    currentText = ""
+  ) => {
+    setManualEditSection(section);
+    setManualEditTargetItemId(itemId);
+    setManualEditTargetBulletIndex(bulletIndex);
+    setManualEditText(currentText);
+    setManualEditError(null);
+    setIsManualEditModalOpen(true);
+  };
+
+  const handleSaveManualEdit = async () => {
+    if (!user || !variantId) return;
+    if (!manualEditText.trim()) {
+      setManualEditError("Content cannot be empty.");
+      return;
+    }
+
+    setIsSavingManualEdit(true);
+    setManualEditError(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(`/api/variants/${variantId}/apply-change`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          requirementName: "Manual Edit",
+          section: manualEditSection,
+          targetItemId: manualEditTargetItemId,
+          targetBulletIndex: manualEditTargetBulletIndex,
+          approvedBullet: manualEditText.trim(),
+          actionType: "ManualEdit",
+          expectedVersion: variant?.version,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409) {
+          throw new Error("Concurrency conflict: this resume variant was modified elsewhere. Please sync and retry.");
+        }
+        throw new Error(data.detail || data.error || "Failed to save manual edit.");
+      }
+
+      setIsManualEditModalOpen(false);
+      showToast(`Manual edit saved! Version updated to v${data.newVersion}.`);
+      await fetchVariant(true);
+      await fetchFitComparison();
+    } catch (err: any) {
+      setManualEditError(err.message || "Failed to save manual edit.");
+    } finally {
+      setIsSavingManualEdit(false);
+    }
+  };
+
+  // --- 2. AI Edit & Proposal Handlers ---
+  const openAiEditModal = (
+    section: "Summary" | "Experience" | "Project",
+    itemId: string,
+    bulletIndex?: number,
+    currentText = ""
+  ) => {
+    setAiEditSection(section);
+    setAiEditTargetItemId(itemId);
+    setAiEditTargetBulletIndex(bulletIndex);
+    setAiEditOriginalText(currentText);
+    setAiEditInstruction("");
+    setAiProposal(null);
+    setConfirmAttestation(false);
+    setAiEditError(null);
+    setIsAiEditModalOpen(true);
+  };
+
+  const handleGenerateAiProposal = async () => {
+    if (!user || !variantId) return;
+    if (!aiEditInstruction.trim()) {
+      setAiEditError("Please enter an instruction for the AI editor.");
+      return;
+    }
+
+    setIsGeneratingProposal(true);
+    setAiEditError(null);
+    setAiProposal(null);
+    setConfirmAttestation(false);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(`/api/variants/${variantId}/ai-edit`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          instruction: aiEditInstruction.trim(),
+          targetItemId: aiEditTargetItemId,
+          targetBulletIndex: aiEditTargetBulletIndex,
+          expectedVersion: variant?.version,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409) {
+          throw new Error("Version conflict: the resume was modified in another session. Please refresh.");
+        }
+        if (res.status === 504) {
+          throw new Error("AI request timed out. Please try a simpler instruction.");
+        }
+        throw new Error(data.detail || data.error || "Failed to generate AI edit proposal.");
+      }
+
+      setAiProposal(data);
+    } catch (err: any) {
+      setAiEditError(err.message || "Failed to generate AI proposal.");
+    } finally {
+      setIsGeneratingProposal(false);
+    }
+  };
+
+  const handleAcceptAiProposal = async () => {
+    if (!user || !variantId || !aiProposal) return;
+
+    if (aiProposal.requiresConfirmation && !confirmAttestation) {
+      setAiEditError("Please confirm that the newly introduced facts are true and user-attested before applying.");
+      return;
+    }
+
+    setIsApplyingProposal(true);
+    setAiEditError(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch(`/api/variants/${variantId}/apply-change`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          requirementName: aiProposal.requiresConfirmation ? "User-Attested AI Customization" : "AI Tailored Edit",
+          section: aiEditSection,
+          targetItemId: aiEditTargetItemId,
+          targetBulletIndex: aiEditTargetBulletIndex,
+          approvedBullet: aiProposal.proposedText,
+          actionType: aiProposal.requiresConfirmation ? "UserAttested" : "ApplyRemediation",
+          confirmUserAttested: aiProposal.requiresConfirmation,
+          expectedVersion: variant?.version,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 409) {
+          throw new Error("Conflict: target resume bullet or version has been updated. Please sync and retry.");
+        }
+        throw new Error(data.detail || data.error || "Failed to apply AI proposal.");
+      }
+
+      setIsAiEditModalOpen(false);
+      setAiProposal(null);
+      showToast(`AI proposal accepted and applied! Variant is now at v${data.newVersion}.`);
+      await fetchVariant(true);
+      await fetchFitComparison();
+    } catch (err: any) {
+      setAiEditError(err.message || "Failed to apply proposal.");
+    } finally {
+      setIsApplyingProposal(false);
+    }
+  };
+
+  // --- 3. Direct Remediation Apply Handlers ---
+  const openApplyModal = (
+    section: "Experience" | "Project" | "Summary" = "Experience",
+    targetItemId?: string,
+    targetBulletIdx?: number
+  ) => {
+    setApplyRequirementName("");
+    setApplyApprovedBullet("");
+    setApplySection(section);
+    const available =
+      section === "Experience"
+        ? variant?.snapshot?.experience || []
+        : variant?.snapshot?.projects || [];
+    const defaultId =
+      targetItemId ||
+      (available[0] as any)?.id ||
+      (section === "Experience" ? "exp_0" : section === "Project" ? "proj_0" : "summary");
+    setApplyTargetItemId(defaultId);
+    setApplyTargetBulletIndex(
+      typeof targetBulletIdx === "number" ? targetBulletIdx : 0
+    );
+    setApplyError(null);
+    setIsApplyModalOpen(true);
+  };
+
+  const handleSectionChange = (section: "Experience" | "Project" | "Summary") => {
+    setApplySection(section);
+    const available =
+      section === "Experience"
+        ? variant?.snapshot?.experience || []
+        : variant?.snapshot?.projects || [];
+    const defaultId =
+      (available[0] as any)?.id ||
+      (section === "Experience" ? "exp_0" : section === "Project" ? "proj_0" : "summary");
+    setApplyTargetItemId(defaultId);
+    setApplyTargetBulletIndex(0);
+  };
+
   const handleApplyChangeSubmit = async () => {
     if (!user || !variantId) return;
     if (!applyApprovedBullet.trim()) {
@@ -185,7 +482,7 @@ export default function TargetedResumeWorkspacePage() {
       const idToken = await user.getIdToken();
       const targetId =
         applyTargetItemId ||
-        (applySection === "Experience" ? "exp_0" : "proj_0");
+        (applySection === "Experience" ? "exp_0" : applySection === "Project" ? "proj_0" : "summary");
 
       const res = await fetch(`/api/variants/${variantId}/apply-change`, {
         method: "POST",
@@ -215,7 +512,7 @@ export default function TargetedResumeWorkspacePage() {
       setIsApplyModalOpen(false);
       setApplyApprovedBullet("");
       setApplyRequirementName("");
-      // Refresh authoritative variant and comparison
+      showToast(`Change applied! Variant incremented to v${data.newVersion}.`);
       await fetchVariant(true);
       await fetchFitComparison();
     } catch (err: any) {
@@ -225,7 +522,7 @@ export default function TargetedResumeWorkspacePage() {
     }
   };
 
-  // Handle Revert Change
+  // --- 4. Revert Change Handler ---
   const handleRevertConfirm = async () => {
     if (!user || !variantId || !revertingChange) return;
 
@@ -251,44 +548,13 @@ export default function TargetedResumeWorkspacePage() {
       }
 
       setRevertingChange(null);
-      // Refresh authoritative variant and comparison
+      showToast(`Change reverted. Variant incremented to v${data.newVersion}.`);
       await fetchVariant(true);
       await fetchFitComparison();
     } catch (err: any) {
       setRevertError(err.message || "Failed to revert change.");
     } finally {
       setIsReverting(false);
-    }
-  };
-
-  // Handle Export Fetch
-  const handleOpenExport = async (format: "markdown" | "plain_text" | "json" | "pdf" = exportFormat) => {
-    if (!user || !variantId) return;
-    setExportFormat(format);
-    setIsExportModalOpen(true);
-    setExportCopied(false);
-
-    if (format === "pdf") {
-      setIsExportLoading(false);
-      return;
-    }
-
-    setIsExportLoading(true);
-    try {
-      const idToken = await user.getIdToken();
-      const res = await fetch(`/api/variants/${variantId}/export?format=${format}`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.detail || data.error || "Failed to export variant.");
-      }
-      setExportData(data);
-    } catch (err: any) {
-      console.error("Export error:", err);
-    } finally {
-      setIsExportLoading(false);
     }
   };
 
@@ -376,7 +642,7 @@ export default function TargetedResumeWorkspacePage() {
     );
   }
 
-  const snapshot = variant.snapshot;
+  const snapshot = variant.snapshot || {};
   const changeLedger = variant.changeLedger || variant.change_ledger || [];
   const appliedCount = changeLedger.filter((c) => c.status === "Applied").length;
   const revertedCount = changeLedger.filter((c) => c.status === "Reverted").length;
@@ -390,6 +656,14 @@ export default function TargetedResumeWorkspacePage() {
 
   return (
     <div className="space-y-6 pb-12">
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="fixed top-5 right-5 z-50 flex items-center gap-2 rounded-card bg-primary text-primary-foreground px-4 py-3 shadow-lg animate-in fade-in slide-in-from-top-2">
+          <CheckCircle2 className="h-5 w-5 text-status-success" />
+          <span className="text-small font-medium">{toastMessage}</span>
+        </div>
+      )}
+
       {/* Breadcrumb & Top Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/70 pb-4">
         <div className="space-y-1">
@@ -553,7 +827,7 @@ export default function TargetedResumeWorkspacePage() {
           }`}
         >
           <FileText className="h-4 w-4" />
-          <span>Resume Snapshot</span>
+          <span>Resume Snapshot & Editor</span>
         </button>
 
         <button
@@ -589,182 +863,261 @@ export default function TargetedResumeWorkspacePage() {
         </button>
       </div>
 
-      {/* Tab 1: Resume Snapshot Viewer */}
+      {/* Tab 1: Resume Snapshot & Editor */}
       {activeTab === "snapshot" && (
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-h2 font-semibold text-primary">Targeted Snapshot (Version {variant.version})</h3>
               <p className="text-small text-secondary">
-                Authoritative content for this variant. Master resume remains untouched.
+                Edit content or request fact-grounded AI enhancements. Master profile remains unchanged.
               </p>
             </div>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => openApplyModal("Experience")}
-              className="gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Apply Direct Change</span>
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openApplyModal("Experience")}
+                className="gap-1.5"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Custom Bullet</span>
+              </Button>
+            </div>
           </div>
 
           <Card className="border-border shadow-subtle divide-y divide-border/60">
-            {/* Header Section */}
-            <div className="p-6 space-y-2">
-              <h2 className="text-xl font-bold text-primary">{snapshot.headline || variant.title}</h2>
-              {snapshot.summary && (
-                <p className="text-body text-secondary leading-relaxed pt-1">{snapshot.summary}</p>
+            {/* Header & Summary Section */}
+            <div className="p-6 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-primary">{snapshot.headline || variant.title}</h2>
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openManualEditModal("Summary", "summary", undefined, snapshot.summary || snapshot.headline || "")}
+                    className="h-7 px-2 text-xs gap-1 text-secondary hover:text-primary"
+                    title="Manually edit executive summary"
+                  >
+                    <Pencil className="h-3 w-3" />
+                    <span>Edit</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => openAiEditModal("Summary", "summary", undefined, snapshot.summary || snapshot.headline || "")}
+                    className="h-7 px-2 text-xs gap-1 border-accent/40 text-accent hover:bg-accent-soft"
+                    title="Refine executive summary with AI"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>AI Refine</span>
+                  </Button>
+                </div>
+              </div>
+
+              {snapshot.summary ? (
+                <p className="text-body text-secondary leading-relaxed bg-page/40 p-3 rounded-btn border border-border/40">
+                  {snapshot.summary}
+                </p>
+              ) : (
+                <p className="text-small text-muted italic">No custom summary provided for this variant.</p>
               )}
             </div>
 
             {/* Experience Section */}
             {snapshot.experience && snapshot.experience.length > 0 && (
-              <div className="p-6 space-y-4">
-                <h4 className="text-small font-bold uppercase tracking-wider text-muted">
-                  Professional Experience
-                </h4>
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Briefcase className="h-4 w-4 text-accent" />
+                    <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                      Professional Experience
+                    </h4>
+                  </div>
+                </div>
+
                 <div className="space-y-6">
-                  {snapshot.experience.map((exp, idx) => (
-                    <div key={idx} className="space-y-2">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <div>
-                          <strong className="text-body font-semibold text-primary">{exp.role}</strong>
-                          <span className="text-secondary"> &mdash; {exp.company}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {(exp.startDate || exp.endDate) && (
-                            <span className="text-caption text-muted">
-                              {exp.startDate} – {exp.isCurrent ? "Present" : exp.endDate}
-                            </span>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openApplyModal("Experience", (exp as any).id || `exp_${idx}`, exp.bullets.length)}
-                            className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
-                            title="Add or edit bullet for this position"
-                          >
-                            <Plus className="h-3 w-3" />
-                            <span>Add Bullet</span>
-                          </Button>
-                        </div>
-                      </div>
-
-                      <ul className="list-disc list-outside ml-5 space-y-1.5 text-body text-secondary">
-                        {exp.bullets.map((b, bIdx) => {
-                          const isModified = changeLedger.some(
-                            (c) =>
-                              c.section === "Experience" &&
-                              c.status === "Applied" &&
-                              (c.approvedText === b || c.approved_text === b)
-                          );
-                          return (
-                            <li
-                              key={bIdx}
-                              className={`group ${isModified ? "text-primary font-medium bg-status-success-soft/50 p-1.5 rounded -ml-1.5 border-l-2 border-status-success" : ""}`}
+                  {snapshot.experience.map((exp: any, idx: number) => {
+                    const itemId = exp.id || `exp_${idx}`;
+                    return (
+                      <div key={idx} className="space-y-2 border-b border-border/40 pb-4 last:border-b-0 last:pb-0">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                          <div>
+                            <strong className="text-body font-semibold text-primary">{exp.role}</strong>
+                            <span className="text-secondary"> &mdash; {exp.company}</span>
+                            {exp.location && <span className="text-caption text-muted ml-2">({exp.location})</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {(exp.startDate || exp.endDate) && (
+                              <span className="text-caption text-muted">
+                                {exp.startDate} – {exp.isCurrent ? "Present" : exp.endDate}
+                              </span>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openApplyModal("Experience", itemId, exp.bullets.length)}
+                              className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
+                              title="Add new bullet point"
                             >
-                              <div className="inline">
-                                <span>{b}</span>
-                                {isModified && (
-                                  <Badge variant="success" className="ml-2 text-[10px] py-0 px-1.5 align-middle">
-                                    Applied in v{variant.version}
-                                  </Badge>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => openApplyModal("Experience", (exp as any).id || `exp_${idx}`, bIdx)}
-                                  className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-caption text-muted hover:text-accent inline-flex items-center gap-0.5 align-middle"
-                                  title="Modify this bullet"
-                                >
-                                  <Sparkles className="h-3 w-3" />
-                                  <span className="text-[10px]">Edit</span>
-                                </button>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-
-                      {exp.technologies && exp.technologies.length > 0 && (
-                        <div className="flex flex-wrap gap-1 pt-1">
-                          {exp.technologies.map((t, tIdx) => (
-                            <Badge key={tIdx} variant="secondary" className="text-[10px]">
-                              {t}
-                            </Badge>
-                          ))}
+                              <Plus className="h-3 w-3" />
+                              <span>Add Bullet</span>
+                            </Button>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        <ul className="list-disc list-outside ml-5 space-y-2 text-body text-secondary">
+                          {exp.bullets.map((b: string, bIdx: number) => {
+                            const isModified = changeLedger.some(
+                              (c) =>
+                                c.section === "Experience" &&
+                                c.status === "Applied" &&
+                                (c.approvedText === b || c.approved_text === b)
+                            );
+                            return (
+                              <li
+                                key={bIdx}
+                                className={`group transition-all ${
+                                  isModified
+                                    ? "text-primary font-medium bg-status-success-soft/40 p-2 rounded -ml-2 border-l-2 border-status-success"
+                                    : "hover:text-primary"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <span>{b}</span>
+                                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => openManualEditModal("Experience", itemId, bIdx, b)}
+                                      className="p-1 rounded text-secondary hover:text-primary hover:bg-page"
+                                      title="Manually edit bullet"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openAiEditModal("Experience", itemId, bIdx, b)}
+                                      className="p-1 rounded text-accent hover:bg-accent-soft"
+                                      title="AI rewrite / refine bullet"
+                                    >
+                                      <Sparkles className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+
+                        {exp.technologies && exp.technologies.length > 0 && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {exp.technologies.map((t: string, tIdx: number) => (
+                              <Badge key={tIdx} variant="secondary" className="text-[10px]">
+                                {t}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             {/* Projects Section */}
             {snapshot.projects && snapshot.projects.length > 0 && (
-              <div className="p-6 space-y-4">
-                <h4 className="text-small font-bold uppercase tracking-wider text-muted">
-                  Key Projects
-                </h4>
-                <div className="space-y-4">
-                  {snapshot.projects.map((proj, idx) => (
-                    <div key={idx} className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <strong className="text-body font-semibold text-primary">{proj.title}</strong>
-                          {proj.role && <span className="text-caption text-muted ml-2">({proj.role})</span>}
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code2 className="h-4 w-4 text-accent" />
+                    <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                      Key Projects & Technical Highlights
+                    </h4>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
+                  {snapshot.projects.map((proj: any, idx: number) => {
+                    const itemId = proj.id || `proj_${idx}`;
+                    const highlights = proj.highlights || proj.bullets || [];
+                    return (
+                      <div key={idx} className="space-y-2 border-b border-border/40 pb-4 last:border-b-0 last:pb-0">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <strong className="text-body font-semibold text-primary">{proj.title}</strong>
+                            {proj.role && <span className="text-caption text-muted ml-2">({proj.role})</span>}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openApplyModal("Project", itemId, highlights.length)}
+                            className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
+                            title="Add highlight"
+                          >
+                            <Plus className="h-3 w-3" />
+                            <span>Add Highlight</span>
+                          </Button>
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openApplyModal("Project", (proj as any).id || `proj_${idx}`, proj.highlights.length)}
-                          className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
-                          title="Add or edit highlight for this project"
-                        >
-                          <Plus className="h-3 w-3" />
-                          <span>Add Highlight</span>
-                        </Button>
+
+                        {proj.description && <p className="text-small text-secondary">{proj.description}</p>}
+
+                        <ul className="list-disc list-outside ml-5 space-y-2 text-body text-secondary">
+                          {highlights.map((hl: string, hlIdx: number) => {
+                            const isModified = changeLedger.some(
+                              (c) =>
+                                c.section === "Project" &&
+                                c.status === "Applied" &&
+                                (c.approvedText === hl || c.approved_text === hl)
+                            );
+                            return (
+                              <li
+                                key={hlIdx}
+                                className={`group transition-all ${
+                                  isModified
+                                    ? "text-primary font-medium bg-status-success-soft/40 p-2 rounded -ml-2 border-l-2 border-status-success"
+                                    : "hover:text-primary"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <span>{hl}</span>
+                                  <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => openManualEditModal("Project", itemId, hlIdx, hl)}
+                                      className="p-1 rounded text-secondary hover:text-primary hover:bg-page"
+                                      title="Manually edit highlight"
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openAiEditModal("Project", itemId, hlIdx, hl)}
+                                      className="p-1 rounded text-accent hover:bg-accent-soft"
+                                      title="AI rewrite / refine highlight"
+                                    >
+                                      <Sparkles className="h-3 w-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+
+                        {(proj.techStack || proj.technologies) && (
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {(proj.techStack || proj.technologies).map((t: string, tIdx: number) => (
+                              <Badge key={tIdx} variant="secondary" className="text-[10px]">
+                                {t}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      {proj.description && <p className="text-small text-secondary">{proj.description}</p>}
-                      <ul className="list-disc list-outside ml-5 space-y-1 text-body text-secondary">
-                        {proj.highlights.map((hl, hlIdx) => {
-                          const isModified = changeLedger.some(
-                            (c) =>
-                              c.section === "Project" &&
-                              c.status === "Applied" &&
-                              (c.approvedText === hl || c.approved_text === hl)
-                          );
-                          return (
-                            <li
-                              key={hlIdx}
-                              className={`group ${isModified ? "text-primary font-medium bg-status-success-soft/50 p-1.5 rounded -ml-1.5 border-l-2 border-status-success" : ""}`}
-                            >
-                              <div className="inline">
-                                <span>{hl}</span>
-                                {isModified && (
-                                  <Badge variant="success" className="ml-2 text-[10px] py-0 px-1.5 align-middle">
-                                    Applied in v{variant.version}
-                                  </Badge>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => openApplyModal("Project", (proj as any).id || `proj_${idx}`, hlIdx)}
-                                  className="ml-2 opacity-0 group-hover:opacity-100 transition-opacity text-caption text-muted hover:text-accent inline-flex items-center gap-0.5 align-middle"
-                                  title="Modify this highlight"
-                                >
-                                  <Sparkles className="h-3 w-3" />
-                                  <span className="text-[10px]">Edit</span>
-                                </button>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -772,11 +1125,14 @@ export default function TargetedResumeWorkspacePage() {
             {/* Skills Section */}
             {snapshot.skills && snapshot.skills.length > 0 && (
               <div className="p-6 space-y-2">
-                <h4 className="text-small font-bold uppercase tracking-wider text-muted">
-                  Technical Skills
-                </h4>
+                <div className="flex items-center gap-2">
+                  <ListChecks className="h-4 w-4 text-accent" />
+                  <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                    Technical Skills & Tools
+                  </h4>
+                </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {snapshot.skills.map((s, idx) => (
+                  {snapshot.skills.map((s: any, idx: number) => (
                     <Badge key={idx} variant="outline" className="text-small">
                       {s.name}
                     </Badge>
@@ -787,15 +1143,55 @@ export default function TargetedResumeWorkspacePage() {
 
             {/* Education Section */}
             {snapshot.education && snapshot.education.length > 0 && (
-              <div className="p-6 space-y-2">
-                <h4 className="text-small font-bold uppercase tracking-wider text-muted">
-                  Education
-                </h4>
-                {snapshot.education.map((ed, idx) => (
-                  <div key={idx} className="text-small text-secondary">
-                    <strong className="text-primary">{ed.degree || "Degree"}</strong> &mdash; {ed.institution}
-                  </div>
-                ))}
+              <div className="p-6 space-y-3">
+                <div className="flex items-center gap-2">
+                  <GraduationCap className="h-4 w-4 text-accent" />
+                  <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                    Education
+                  </h4>
+                </div>
+                <div className="space-y-2">
+                  {snapshot.education.map((ed: any, idx: number) => (
+                    <div key={idx} className="text-small text-secondary flex items-baseline justify-between">
+                      <div>
+                        <strong className="text-primary">{ed.degree || "Degree"}</strong> &mdash; {ed.institution}
+                        {ed.fieldOfStudy && <span className="text-muted ml-1">in {ed.fieldOfStudy}</span>}
+                      </div>
+                      {(ed.startDate || ed.endDate) && (
+                        <span className="text-caption text-muted">
+                          {ed.startDate} – {ed.endDate}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Certifications Section */}
+            {snapshot.certifications && snapshot.certifications.length > 0 && (
+              <div className="p-6 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Award className="h-4 w-4 text-accent" />
+                  <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                    Certifications & Credentials
+                  </h4>
+                </div>
+                <div className="space-y-2">
+                  {snapshot.certifications.map((c: any, idx: number) => (
+                    <div key={idx} className="text-small text-secondary flex items-baseline justify-between">
+                      <div>
+                        <strong className="text-primary">{c.title}</strong>
+                        {c.issuer && <span className="text-muted ml-1">&mdash; {c.issuer}</span>}
+                      </div>
+                      {c.issueDate && (
+                        <span className="text-caption text-muted">
+                          {c.issueDate}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </Card>
@@ -1048,6 +1444,184 @@ export default function TargetedResumeWorkspacePage() {
         </div>
       )}
 
+      {/* Manual Edit Modal */}
+      {isManualEditModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsManualEditModalOpen(false)}
+          title="Manual Content Edit"
+          description="Directly edit this resume section. Your changes will create a new variant version without calling an LLM."
+          maxWidth="md"
+        >
+          <div className="space-y-4">
+            {manualEditError && <ErrorAlert message={manualEditError} />}
+
+            <div className="space-y-1.5">
+              <label className="text-small font-medium text-primary">Content</label>
+              <Textarea
+                rows={4}
+                value={manualEditText}
+                onChange={(e) => setManualEditText(e.target.value)}
+                placeholder="Enter exact content..."
+                className="text-small"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+              <Button variant="ghost" onClick={() => setIsManualEditModalOpen(false)} disabled={isSavingManualEdit}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={handleSaveManualEdit} disabled={isSavingManualEdit}>
+                {isSavingManualEdit ? "Saving..." : `Save & Increment to v${variant.version + 1}`}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* AI Edit & Proposal Modal */}
+      {isAiEditModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => {
+            setIsAiEditModalOpen(false);
+            setAiProposal(null);
+          }}
+          title="AI Bullet & Section Editor"
+          description="Request targeted refinement, shortening, or fact-grounded rewording. Review the proposal before applying."
+          maxWidth="lg"
+        >
+          <div className="space-y-5">
+            {aiEditError && <ErrorAlert message={aiEditError} />}
+
+            {/* Original Text Reference */}
+            <div className="p-3 rounded bg-page border border-border space-y-1">
+              <span className="text-caption font-semibold uppercase tracking-wider text-muted">
+                Original Text:
+              </span>
+              <p className="text-small text-secondary italic">
+                &ldquo;{aiEditOriginalText}&rdquo;
+              </p>
+            </div>
+
+            {/* Instruction Input */}
+            <div className="space-y-2">
+              <label className="text-small font-medium text-primary">Edit Instruction</label>
+              <div className="flex gap-2">
+                <Input
+                  value={aiEditInstruction}
+                  onChange={(e) => setAiEditInstruction(e.target.value)}
+                  placeholder="e.g. Make shorter, emphasize metrics, add PostgreSQL optimization..."
+                  disabled={isGeneratingProposal || isApplyingProposal}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleGenerateAiProposal();
+                    }
+                  }}
+                />
+                <Button
+                  variant="primary"
+                  onClick={handleGenerateAiProposal}
+                  disabled={isGeneratingProposal || !aiEditInstruction.trim()}
+                  className="gap-1.5 shrink-0"
+                >
+                  <Wand2 className={`h-4 w-4 ${isGeneratingProposal ? "animate-spin" : ""}`} />
+                  <span>{isGeneratingProposal ? "Generating..." : "Propose Edit"}</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* Proposal Card (Rendered only when proposal is returned) */}
+            {aiProposal && (
+              <div className="space-y-4 border border-border rounded-card p-4 bg-surface shadow-subtle animate-in fade-in">
+                <div className="flex items-center justify-between border-b border-border/60 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-accent" />
+                    <span className="text-body font-bold text-primary">AI Edit Proposal</span>
+                  </div>
+                  <Badge variant={aiProposal.validation.isValid ? "success" : "secondary"}>
+                    {aiProposal.validation.isValid ? "Fact Validated" : "Requires Confirmation"}
+                  </Badge>
+                </div>
+
+                {/* Proposed Text */}
+                <div className="space-y-1">
+                  <span className="text-caption font-semibold text-status-success uppercase">
+                    Proposed Text:
+                  </span>
+                  <div className="p-3 rounded bg-status-success-soft/30 border border-status-success/30 text-body font-medium text-primary">
+                    {aiProposal.proposedText}
+                  </div>
+                </div>
+
+                {/* Diff Representation */}
+                {aiProposal.diff && (
+                  <div className="space-y-1">
+                    <span className="text-caption font-semibold text-muted uppercase">
+                      Changes / Diff:
+                    </span>
+                    <pre className="p-2.5 rounded bg-page text-caption font-mono overflow-x-auto text-secondary whitespace-pre-wrap">
+                      {aiProposal.diff}
+                    </pre>
+                  </div>
+                )}
+
+                {/* User Attestation Confirmation Notice if required */}
+                {aiProposal.requiresConfirmation && (
+                  <div className="p-3 rounded bg-amber-500/10 border border-amber-500/30 text-small text-amber-600 dark:text-amber-400 space-y-2">
+                    <div className="flex items-center gap-1.5 font-semibold">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>New User-Attested Facts Detected</span>
+                    </div>
+                    <p className="text-caption">
+                      The instruction introduced details (e.g. tools or metrics) not found in candidate baseline evidence.
+                      {aiProposal.userAttestedFacts.length > 0 && (
+                        <span> Detected items: <strong>{aiProposal.userAttestedFacts.join(", ")}</strong>.</span>
+                      )}
+                    </p>
+                    <label className="flex items-center gap-2 cursor-pointer pt-1">
+                      <input
+                        type="checkbox"
+                        checked={confirmAttestation}
+                        onChange={(e) => setConfirmAttestation(e.target.checked)}
+                        className="rounded border-border text-accent focus:ring-accent"
+                      />
+                      <span className="text-small font-medium text-primary">
+                        I confirm and attest that these claims are factually accurate.
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Accept / Reject Buttons */}
+                <div className="flex justify-end gap-2 pt-2 border-t border-border/60">
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setAiProposal(null);
+                      setIsAiEditModalOpen(false);
+                    }}
+                    disabled={isApplyingProposal}
+                  >
+                    Reject Proposal
+                  </Button>
+                  <Button
+                    variant="primary"
+                    onClick={handleAcceptAiProposal}
+                    disabled={isApplyingProposal || (aiProposal.requiresConfirmation && !confirmAttestation)}
+                    className="gap-1.5 shadow-subtle"
+                  >
+                    <Check className="h-4 w-4" />
+                    <span>{isApplyingProposal ? "Applying..." : `Accept & Save v${variant.version + 1}`}</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
       {/* Apply Direct Change Modal */}
       {isApplyModalOpen && (
         <Modal
@@ -1076,7 +1650,9 @@ export default function TargetedResumeWorkspacePage() {
               const availableItems =
                 applySection === "Experience"
                   ? snapshot?.experience || []
-                  : snapshot?.projects || [];
+                  : applySection === "Project"
+                  ? snapshot?.projects || []
+                  : [];
 
               const currentItem =
                 availableItems.find(
@@ -1089,7 +1665,9 @@ export default function TargetedResumeWorkspacePage() {
               const currentBullets: string[] =
                 applySection === "Experience"
                   ? (currentItem as any)?.bullets || []
-                  : (currentItem as any)?.highlights || [];
+                  : applySection === "Project"
+                  ? (currentItem as any)?.highlights || []
+                  : [];
 
               const isAppending = applyTargetBulletIndex >= currentBullets.length;
               const originalBulletPreview = !isAppending && currentBullets[applyTargetBulletIndex];
@@ -1101,11 +1679,12 @@ export default function TargetedResumeWorkspacePage() {
                       <label className="text-small font-medium text-primary">Target Section</label>
                       <select
                         value={applySection}
-                        onChange={(e) => handleSectionChange(e.target.value as "Experience" | "Project")}
+                        onChange={(e) => handleSectionChange(e.target.value as "Experience" | "Project" | "Summary")}
                         className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary"
                       >
                         <option value="Experience">Experience</option>
                         <option value="Project">Project</option>
+                        <option value="Summary">Summary</option>
                       </select>
                     </div>
 
@@ -1141,31 +1720,33 @@ export default function TargetedResumeWorkspacePage() {
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="text-small font-medium text-primary">Target Bullet</label>
-                      <span className="text-caption text-muted">
-                        {isAppending
-                          ? `Appending new bullet #${currentBullets.length + 1}`
-                          : `Modifying bullet #${applyTargetBulletIndex + 1}`}
-                      </span>
-                    </div>
+                  {applySection !== "Summary" && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-small font-medium text-primary">Target Bullet</label>
+                        <span className="text-caption text-muted">
+                          {isAppending
+                            ? `Appending new bullet #${currentBullets.length + 1}`
+                            : `Modifying bullet #${applyTargetBulletIndex + 1}`}
+                        </span>
+                      </div>
 
-                    <select
-                      value={applyTargetBulletIndex}
-                      onChange={(e) => setApplyTargetBulletIndex(parseInt(e.target.value, 10) || 0)}
-                      className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary truncate"
-                    >
-                      {currentBullets.map((b: string, bIdx: number) => (
-                        <option key={bIdx} value={bIdx}>
-                          Bullet {bIdx + 1}: {b.length > 65 ? b.slice(0, 65) + "..." : b}
+                      <select
+                        value={applyTargetBulletIndex}
+                        onChange={(e) => setApplyTargetBulletIndex(parseInt(e.target.value, 10) || 0)}
+                        className="w-full h-9 rounded-btn border border-border bg-page px-3 text-small text-primary truncate"
+                      >
+                        {currentBullets.map((b: string, bIdx: number) => (
+                          <option key={bIdx} value={bIdx}>
+                            Bullet {bIdx + 1}: {b.length > 65 ? b.slice(0, 65) + "..." : b}
+                          </option>
+                        ))}
+                        <option value={currentBullets.length}>
+                          + Append as new bullet (Index {currentBullets.length})
                         </option>
-                      ))}
-                      <option value={currentBullets.length}>
-                        + Append as new bullet (Index {currentBullets.length})
-                      </option>
-                    </select>
-                  </div>
+                      </select>
+                    </div>
+                  )}
 
                   {originalBulletPreview && (
                     <div className="p-2.5 rounded bg-muted/10 border border-border/70 space-y-1">
@@ -1248,7 +1829,10 @@ export default function TargetedResumeWorkspacePage() {
       {isExportModalOpen && (
         <Modal
           isOpen={true}
-          onClose={() => setIsExportModalOpen(false)}
+          onClose={() => {
+            cleanupPdfPreview();
+            setIsExportModalOpen(false);
+          }}
           title="Export Targeted Resume"
           description={`Read-only export generated strictly from variant snapshot v${variant.version}.`}
           maxWidth="lg"
@@ -1272,29 +1856,43 @@ export default function TargetedResumeWorkspacePage() {
 
             {/* Content Preview */}
             {exportFormat === "pdf" ? (
-              <div className="p-6 rounded-card border border-border bg-page/40 space-y-5 text-center">
-                <div className="mx-auto w-12 h-12 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center text-accent">
-                  <FileText className="h-6 w-6" />
+              isPdfLoading ? (
+                <LoadingState text="Generating ATS vector PDF preview..." />
+              ) : pdfPreviewError ? (
+                <ErrorAlert message={pdfPreviewError} onRetry={() => handleOpenExport("pdf")} />
+              ) : pdfPreviewUrl ? (
+                <div className="space-y-3">
+                  <div className="rounded-card border border-border bg-page overflow-hidden h-[420px]">
+                    <object
+                      data={pdfPreviewUrl}
+                      type="application/pdf"
+                      className="w-full h-full"
+                    >
+                      <div className="p-6 text-center space-y-3">
+                        <p className="text-small text-secondary">Your browser does not support inline PDF previews.</p>
+                        <Button variant="primary" size="sm" onClick={handleDownloadPdf}>
+                          Download ATS PDF
+                        </Button>
+                      </div>
+                    </object>
+                  </div>
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-caption text-muted">
+                      Template: Single-Column ATS Vector PDF &bull; 100% Parser Compliant
+                    </span>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={handleDownloadPdf}
+                      disabled={isPdfDownloading}
+                      className="gap-1.5 shadow-subtle"
+                    >
+                      <Download className={`h-3.5 w-3.5 ${isPdfDownloading ? "animate-bounce" : ""}`} />
+                      <span>{isPdfDownloading ? "Downloading..." : "Download ATS PDF"}</span>
+                    </Button>
+                  </div>
                 </div>
-                <div className="space-y-1.5 max-w-md mx-auto">
-                  <h3 className="text-h3 font-bold text-primary">ATS-Optimized Vector PDF</h3>
-                  <p className="text-small text-secondary">
-                    Single-column vector layout engineered for 100% compliance with ATS parsers (Workday, Taleo, Greenhouse, Lever). Native selectable text with standard Helvetica typography.
-                  </p>
-                </div>
-                <div className="pt-2 flex justify-center gap-3">
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={handleDownloadPdf}
-                    disabled={isPdfDownloading}
-                    className="gap-2 px-6 shadow-subtle"
-                  >
-                    <Download className={`h-4 w-4 ${isPdfDownloading ? "animate-bounce" : ""}`} />
-                    <span>{isPdfDownloading ? "Generating PDF..." : "Download ATS PDF"}</span>
-                  </Button>
-                </div>
-              </div>
+              ) : null
             ) : isExportLoading ? (
               <LoadingState text="Generating formatted export..." />
             ) : exportData ? (

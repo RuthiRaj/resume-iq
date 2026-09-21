@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/common/state-views";
+import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
 import {
   Briefcase,
@@ -21,12 +22,15 @@ import {
   MapPin,
   Sparkles,
   X,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 
 const ACTION_VERBS = ["Spearheaded", "Architected", "Optimized", "Automated", "Engineered", "Scaled", "Reduced", "Accelerated"];
 
 export default function ExperiencePage() {
-  const { experience, addExperience, updateExperience, deleteExperience } = useCareer();
+  const { experience, addExperience, updateExperience, deleteExperience, isLoaded } = useCareer();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -34,6 +38,17 @@ export default function ExperiencePage() {
   const [bulletsList, setBulletsList] = useState<string[]>([]);
   const [techInput, setTechInput] = useState("");
   const [techList, setTechList] = useState<string[]>([]);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   const {
     register,
@@ -50,6 +65,7 @@ export default function ExperiencePage() {
 
   const handleOpenAdd = () => {
     setEditingId(null);
+    setSubmitError(null);
     setBulletsList([
       "Spearheaded redesign of core web client, improving performance scores by 35%.",
     ]);
@@ -69,6 +85,7 @@ export default function ExperiencePage() {
 
   const handleOpenEdit = (exp: ExperienceData) => {
     setEditingId(exp.id || null);
+    setSubmitError(null);
     setBulletsList(exp.bullets || []);
     setTechList(exp.technologies || []);
     reset(exp);
@@ -110,23 +127,55 @@ export default function ExperiencePage() {
     setValue("technologies", updated);
   };
 
-  const onSubmit = (data: ExperienceData) => {
+  const onSubmit = async (data: ExperienceData) => {
+    if (bulletsList.length === 0) {
+      setSubmitError("Please add at least one bullet point describing your responsibilities or achievements.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
     const submission = {
       ...data,
       bullets: bulletsList,
       technologies: techList,
       endDate: data.isCurrent ? "Present" : data.endDate,
     };
-    if (editingId) {
-      updateExperience(editingId, submission);
-    } else {
-      addExperience(submission);
+
+    try {
+      if (editingId) {
+        await updateExperience(editingId, submission);
+        showToast("Position updated successfully.");
+      } else {
+        await addExperience(submission);
+        showToast("Position added successfully.");
+      }
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save position. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsModalOpen(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    await deleteExperience(itemToDelete.id);
+    showToast("Position deleted from workspace.");
+    setItemToDelete(null);
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="flex items-center gap-2 rounded-btn bg-status-success-soft px-4 py-2.5 text-status-success text-small font-medium border border-status-success/20 animate-in fade-in duration-200">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Professional Work Experience</h2>
@@ -140,7 +189,19 @@ export default function ExperiencePage() {
         </Button>
       </div>
 
-      {experience.length === 0 ? (
+      {!isLoaded ? (
+        <div className="space-y-4">
+          {[1, 2].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-5 space-y-3">
+                <div className="h-5 bg-border/60 rounded w-1/3" />
+                <div className="h-4 bg-border/40 rounded w-1/4" />
+                <div className="h-12 bg-border/30 rounded w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : experience.length === 0 ? (
         <EmptyState
           title="No work experience added"
           description="Add your current and previous professional roles to demonstrate career progression."
@@ -169,10 +230,12 @@ export default function ExperiencePage() {
                           {exp.isCurrent ? "Present" : formatDate(exp.endDate)}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <MapPin className="h-3.5 w-3.5" />
-                        <span>{exp.location}</span>
-                      </div>
+                      {exp.location && (
+                        <div className="flex items-center gap-1.5">
+                          <MapPin className="h-3.5 w-3.5" />
+                          <span>{exp.location}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Bullet Points */}
@@ -209,7 +272,13 @@ export default function ExperiencePage() {
                       <span>Edit</span>
                     </Button>
                     <Button
-                      onClick={() => exp.id && deleteExperience(exp.id)}
+                      onClick={() =>
+                        exp.id &&
+                        setItemToDelete({
+                          id: exp.id,
+                          name: `${exp.role} @ ${exp.company}`,
+                        })
+                      }
                       variant="ghost"
                       size="sm"
                       className="text-status-error hover:bg-status-error-soft"
@@ -224,7 +293,7 @@ export default function ExperiencePage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Add / Edit Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -233,9 +302,16 @@ export default function ExperiencePage() {
         maxWidth="2xl"
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {submitError && (
+            <div className="flex items-center gap-2 rounded-btn bg-status-error-soft p-3 text-status-error text-small font-medium border border-status-error/20">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Company Name</label>
+              <label className="text-small font-medium text-primary">Company Name *</label>
               <Input
                 placeholder="e.g. Stripe or Apex Scale"
                 {...register("company")}
@@ -247,7 +323,7 @@ export default function ExperiencePage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Job Title / Role</label>
+              <label className="text-small font-medium text-primary">Job Title / Role *</label>
               <Input
                 placeholder="e.g. Senior Software Engineer"
                 {...register("role")}
@@ -270,7 +346,7 @@ export default function ExperiencePage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Start Date (YYYY-MM)</label>
+              <label className="text-small font-medium text-primary">Start Date (YYYY-MM) *</label>
               <Input
                 placeholder="2023-01"
                 {...register("startDate")}
@@ -303,7 +379,7 @@ export default function ExperiencePage() {
           {/* AI Action Verbs & Bullet points */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="text-small font-medium text-primary">Experience Bullets</label>
+              <label className="text-small font-medium text-primary">Experience Bullets *</label>
               <div className="flex items-center gap-1 text-caption text-accent font-semibold">
                 <Sparkles className="h-3 w-3" />
                 <span>AI Action Verbs:</span>
@@ -326,7 +402,7 @@ export default function ExperiencePage() {
 
             <div className="flex gap-2">
               <Input
-                placeholder="Type bullet point with metric..."
+                placeholder="Type bullet point with quantifiable impact..."
                 value={bulletInput}
                 onChange={(e) => setBulletInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -351,7 +427,7 @@ export default function ExperiencePage() {
                   <button
                     type="button"
                     onClick={() => handleRemoveBullet(idx)}
-                    className="text-muted hover:text-status-error"
+                    className="text-muted hover:text-status-error shrink-0 mt-0.5"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -365,7 +441,7 @@ export default function ExperiencePage() {
             <label className="text-small font-medium text-primary">Technologies Used</label>
             <div className="flex gap-2">
               <Input
-                placeholder="e.g. Next.js"
+                placeholder="e.g. Next.js, Python, AWS"
                 value={techInput}
                 onChange={(e) => setTechInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -393,15 +469,32 @@ export default function ExperiencePage() {
           </div>
 
           <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
+            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              {editingId ? "Save Position" : "Add Position"}
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>{editingId ? "Save Changes" : "Add Position"}</span>
+              )}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(itemToDelete)}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Work Experience Position"
+        description="Are you sure you want to delete this position from your Master Career Workspace? Existing targeted resume variants will not be affected."
+        itemName={itemToDelete?.name}
+      />
     </div>
   );
 }

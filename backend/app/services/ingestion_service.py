@@ -19,6 +19,7 @@ from app.schemas.ingestion import (
     IngestionConfirmResponse,
 )
 from app.services.document_extractor import extract_document_text, sanitize_filename
+from app.services.cloud_storage_service import upload_document_backup
 from app.ai.ingestion_parser import parse_resume_text
 from app.services.profile_service import ProfileService
 from app.services.resume_service import (
@@ -54,6 +55,16 @@ class IngestionService:
         # Parse raw text into structured profile draft
         parsed_data = await parse_resume_text(raw_text)
 
+        # Best-effort backup of the original file to Cloudinary. This NEVER
+        # raises and NEVER blocks ingestion -- see cloud_storage_service.py
+        # for why. If it fails or isn't configured, file_url is simply None
+        # and the draft still completes successfully.
+        file_url = await upload_document_backup(
+            content=content,
+            filename=clean_name,
+            user_id=user.uid,
+        )
+
         draft = IngestionDraft(
             ingestion_id=ingestion_id,
             document_name=clean_name,
@@ -64,6 +75,7 @@ class IngestionService:
             raw_text_char_count=len(raw_text),
             parsed_data=parsed_data,
             error_message=None,
+            file_url=file_url,
             created_at=now_iso,
             updated_at=now_iso,
             completed_at=None,

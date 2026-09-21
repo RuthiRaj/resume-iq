@@ -8,6 +8,7 @@ from app.api.router import api_v1_router
 from app.api.v1.health import router as health_router
 from app.services.resume_service import close_http_client
 from app.ai.providers.groq_provider import close_groq_client
+from app.ai.providers.nvidia_provider import close_nvidia_client
 from app.mcp.mcp_server import mcp_app
 
 
@@ -18,6 +19,7 @@ async def lifespan(app: FastAPI):
     # Application Shutdown - Cleanly close persistent HTTP & AI connection pools
     await close_http_client()
     await close_groq_client()
+    await close_nvidia_client()
 
 
 app = FastAPI(

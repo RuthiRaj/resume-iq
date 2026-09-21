@@ -14,7 +14,15 @@ MatchStatus = Literal["StrongMatch", "PartialMatch", "Missing"]
 
 # --- 1. Change & Version Ledger ---
 
-ChangeActionType = Literal["ApplyRemediation", "DirectEdit", "RevertChange", "CandidateFactAddition"]
+ChangeActionType = Literal[
+    "ApplyRemediation",
+    "DirectEdit",
+    "RevertChange",
+    "CandidateFactAddition",
+    "Generated",
+    "UserAttested",
+    "ManualEdit",
+]
 ChangeStatus = Literal["Draft", "Approved", "Applied", "Reverted"]
 
 
@@ -68,6 +76,11 @@ class TargetedResumeVariant(BaseModel):
     # Granular Change & Version Ledger
     change_ledger: List[ChangeRecord] = Field(default_factory=list, alias="changeLedger")
 
+    # Generation Execution Metadata
+    provider: Optional[str] = Field(default=None)
+    model: Optional[str] = Field(default=None)
+    generation_metadata: Optional[Dict[str, Any]] = Field(default=None, alias="generationMetadata")
+
     created_at: str = Field(..., alias="createdAt")
     updated_at: str = Field(..., alias="updatedAt")
 
@@ -120,14 +133,22 @@ class CreateTargetedVariantRequest(BaseModel):
     )
     target_role: str = Field(..., min_length=1, max_length=150, alias="targetRole")
     target_company: Optional[str] = Field(default="", max_length=150, alias="targetCompany")
-    job_description: str = Field(..., min_length=1, max_length=50000, alias="jobDescription")
+    job_description: Optional[str] = Field(default="", max_length=50000, alias="jobDescription")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class GenerateResumeRequest(BaseModel):
+    target_role: str = Field(..., min_length=1, max_length=150, alias="targetRole")
+    target_company: Optional[str] = Field(default="", max_length=150, alias="targetCompany")
+    job_description: Optional[str] = Field(default="", max_length=50000, alias="jobDescription")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
 class ApplyVariantChangeRequest(BaseModel):
     remediation_id: Optional[str] = Field(default=None, max_length=100, alias="remediationId")
-    requirement_name: str = Field(..., min_length=1, max_length=200, alias="requirementName")
+    requirement_name: Optional[str] = Field(default="Variant Customization", min_length=1, max_length=200, alias="requirementName")
     section: EvidenceSourceSection = Field(default="Experience")
     target_item_id: str = Field(
         default="exp_0",
@@ -140,6 +161,31 @@ class ApplyVariantChangeRequest(BaseModel):
     approved_bullet: str = Field(..., min_length=1, max_length=2000, alias="approvedBullet")
     source_evidence_id: Optional[str] = Field(default=None, max_length=64, alias="sourceEvidenceId")
     expected_version: Optional[int] = Field(default=None, ge=1, alias="expectedVersion")
+    action_type: Optional[ChangeActionType] = Field(default=None, alias="actionType")
+    confirm_user_attested: Optional[bool] = Field(default=False, alias="confirmUserAttested")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class AiEditVariantRequest(BaseModel):
+    instruction: str = Field(..., min_length=1, max_length=1000, description="Editing instruction from user")
+    target_item_id: str = Field(..., min_length=1, max_length=50, alias="targetItemId", description="e.g. exp_0, proj_0, summary")
+    target_bullet_index: Optional[int] = Field(default=None, ge=0, alias="targetBulletIndex")
+    expected_version: Optional[int] = Field(default=None, ge=1, alias="expectedVersion")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class AiEditProposalResponse(BaseModel):
+    original_text: str = Field(..., alias="originalText")
+    proposed_text: str = Field(..., alias="proposedText")
+    diff: str = Field(..., description="Diff representation between original and proposed text")
+    validation: Dict[str, Any] = Field(..., description="Validation outcome from claim validator")
+    requires_confirmation: bool = Field(default=False, alias="requiresConfirmation")
+    user_attested_facts: List[str] = Field(default_factory=list, alias="userAttestedFacts")
+    target_item_id: str = Field(..., alias="targetItemId")
+    target_bullet_index: Optional[int] = Field(default=None, alias="targetBulletIndex")
+    version: int
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 

@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/common/state-views";
+import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
 import {
   Sparkles,
@@ -22,11 +23,13 @@ import {
   ExternalLink,
   Github,
   X,
+  Loader2,
   CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 
 export default function ProjectsPage() {
-  const { projects, addProject, updateProject, deleteProject } = useCareer();
+  const { projects, addProject, updateProject, deleteProject, isLoaded } = useCareer();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -35,6 +38,17 @@ export default function ProjectsPage() {
 
   const [highlightInput, setHighlightInput] = useState("");
   const [highlightsList, setHighlightsList] = useState<string[]>([]);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   const {
     register,
@@ -48,6 +62,7 @@ export default function ProjectsPage() {
 
   const handleOpenAdd = () => {
     setEditingId(null);
+    setSubmitError(null);
     setTechList(["Next.js", "TypeScript", "Tailwind CSS"]);
     setHighlightsList(["Engineered high-throughput architecture with 99.9% uptime."]);
     reset({
@@ -66,6 +81,7 @@ export default function ProjectsPage() {
 
   const handleOpenEdit = (proj: ProjectData) => {
     setEditingId(proj.id || null);
+    setSubmitError(null);
     setTechList(proj.techStack || []);
     setHighlightsList(proj.highlights || []);
     reset(proj);
@@ -102,22 +118,58 @@ export default function ProjectsPage() {
     setValue("highlights", updated);
   };
 
-  const onSubmit = (data: ProjectData) => {
+  const onSubmit = async (data: ProjectData) => {
+    if (highlightsList.length === 0) {
+      setSubmitError("Please add at least one highlight bullet describing measurable project impact.");
+      return;
+    }
+    if (techList.length === 0) {
+      setSubmitError("Please add at least one technology tag.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError(null);
+
     const submission = {
       ...data,
       techStack: techList,
       highlights: highlightsList,
     };
-    if (editingId) {
-      updateProject(editingId, submission);
-    } else {
-      addProject(submission);
+
+    try {
+      if (editingId) {
+        await updateProject(editingId, submission);
+        showToast("Project updated successfully.");
+      } else {
+        await addProject(submission);
+        showToast("Project added successfully.");
+      }
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save project. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsModalOpen(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    await deleteProject(itemToDelete.id);
+    showToast("Project deleted from workspace.");
+    setItemToDelete(null);
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="flex items-center gap-2 rounded-btn bg-status-success-soft px-4 py-2.5 text-status-success text-small font-medium border border-status-success/20 animate-in fade-in duration-200">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Featured Engineering Projects</h2>
@@ -131,7 +183,19 @@ export default function ProjectsPage() {
         </Button>
       </div>
 
-      {projects.length === 0 ? (
+      {!isLoaded ? (
+        <div className="space-y-4">
+          {[1, 2].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-5 space-y-3">
+                <div className="h-5 bg-border/60 rounded w-1/3" />
+                <div className="h-4 bg-border/40 rounded w-1/4" />
+                <div className="h-12 bg-border/30 rounded w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
         <EmptyState
           title="No projects added yet"
           description="Add technical projects with measurable outcomes to demonstrate system capabilities."
@@ -148,22 +212,26 @@ export default function ProjectsPage() {
                   <div className="space-y-2.5 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <h3 className="text-h2 font-semibold text-primary">{proj.title}</h3>
-                      <Badge variant="secondary">{proj.role}</Badge>
-                      <div className="flex items-center gap-1 text-small text-muted">
+                      {proj.role && (
+                        <span className="text-body font-medium text-secondary">
+                          &bull; {proj.role}
+                        </span>
+                      )}
+                    </div>
+
+                    {(proj.startDate || proj.endDate) && (
+                      <div className="flex items-center gap-1.5 text-small text-muted">
                         <Calendar className="h-3.5 w-3.5" />
                         <span>
                           {formatDate(proj.startDate)} &mdash; {formatDate(proj.endDate)}
                         </span>
                       </div>
-                    </div>
+                    )}
 
-                    <p className="text-body text-secondary">{proj.description}</p>
+                    <p className="text-body text-secondary leading-relaxed">{proj.description}</p>
 
-                    {/* Bullet Highlights */}
+                    {/* Highlights */}
                     <div className="space-y-1 pt-1">
-                      <div className="text-caption font-semibold text-muted uppercase tracking-[0.4px]">
-                        Impact Highlights
-                      </div>
                       <ul className="list-disc pl-4 space-y-1 text-small text-primary">
                         {proj.highlights?.map((hl, i) => (
                           <li key={i} className="leading-relaxed">
@@ -173,23 +241,25 @@ export default function ProjectsPage() {
                       </ul>
                     </div>
 
-                    {/* Tech Stack Chips */}
-                    <div className="flex flex-wrap items-center gap-1.5 pt-2">
-                      {proj.techStack?.map((tech) => (
-                        <Badge key={tech} variant="outline" className="bg-page text-secondary">
-                          {tech}
-                        </Badge>
-                      ))}
-                    </div>
+                    {/* Tech Stack */}
+                    {proj.techStack && proj.techStack.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                        {proj.techStack.map((tech) => (
+                          <Badge key={tech} variant="outline" className="bg-page text-secondary">
+                            {tech}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Links */}
-                    <div className="flex items-center gap-4 pt-1 text-small text-secondary">
+                    <div className="flex flex-wrap items-center gap-3 pt-2">
                       {proj.liveUrl && (
                         <a
                           href={proj.liveUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="flex items-center gap-1 text-accent hover:underline font-medium"
+                          className="inline-flex items-center gap-1 text-small font-medium text-accent hover:underline"
                         >
                           <ExternalLink className="h-3.5 w-3.5" />
                           <span>Live Demo</span>
@@ -200,10 +270,10 @@ export default function ProjectsPage() {
                           href={proj.repoUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="flex items-center gap-1 text-secondary hover:text-primary"
+                          className="inline-flex items-center gap-1 text-small font-medium text-secondary hover:text-primary"
                         >
                           <Github className="h-3.5 w-3.5" />
-                          <span>Source Code</span>
+                          <span>Repository</span>
                         </a>
                       )}
                     </div>
@@ -220,7 +290,13 @@ export default function ProjectsPage() {
                       <span>Edit</span>
                     </Button>
                     <Button
-                      onClick={() => proj.id && deleteProject(proj.id)}
+                      onClick={() =>
+                        proj.id &&
+                        setItemToDelete({
+                          id: proj.id,
+                          name: proj.title,
+                        })
+                      }
                       variant="ghost"
                       size="sm"
                       className="text-status-error hover:bg-status-error-soft"
@@ -235,20 +311,27 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      {/* Modal */}
+      {/* Add / Edit Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? "Edit Project" : "Add Featured Project"}
-        description="Provide project overview, architecture details, and quantifiable metrics."
+        title={editingId ? "Edit Project" : "Add Engineering Project"}
+        description="Detail system architecture, tech stacks, links, and impact metrics."
         maxWidth="2xl"
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {submitError && (
+            <div className="flex items-center gap-2 rounded-btn bg-status-error-soft p-3 text-status-error text-small font-medium border border-status-error/20">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Project Title</label>
+              <label className="text-small font-medium text-primary">Project Title *</label>
               <Input
-                placeholder="e.g. ResumeIQ Career Engine"
+                placeholder="e.g. Distributed Task Queue"
                 {...register("title")}
                 className={errors.title ? "border-status-error" : ""}
               />
@@ -258,9 +341,9 @@ export default function ProjectsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Your Role</label>
+              <label className="text-small font-medium text-primary">Your Role *</label>
               <Input
-                placeholder="e.g. Lead Architect & Full Stack Dev"
+                placeholder="e.g. Lead Architect / Creator"
                 {...register("role")}
                 className={errors.role ? "border-status-error" : ""}
               />
@@ -272,9 +355,9 @@ export default function ProjectsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Start Date (YYYY-MM)</label>
+              <label className="text-small font-medium text-primary">Start Date (YYYY-MM) *</label>
               <Input
-                placeholder="2024-01"
+                placeholder="2023-03"
                 {...register("startDate")}
                 className={errors.startDate ? "border-status-error" : ""}
               />
@@ -284,9 +367,9 @@ export default function ProjectsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">End Date (or Present)</label>
+              <label className="text-small font-medium text-primary">End Date (YYYY-MM) *</label>
               <Input
-                placeholder="2024-05"
+                placeholder="2023-08"
                 {...register("endDate")}
                 className={errors.endDate ? "border-status-error" : ""}
               />
@@ -297,9 +380,10 @@ export default function ProjectsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Brief Description</label>
-            <Input
-              placeholder="High-level summary of what the system does..."
+            <label className="text-small font-medium text-primary">Overview / Description *</label>
+            <Textarea
+              rows={3}
+              placeholder="High-level architecture and problem solved..."
               {...register("description")}
               className={errors.description ? "border-status-error" : ""}
             />
@@ -308,12 +392,12 @@ export default function ProjectsPage() {
             )}
           </div>
 
-          {/* Bullet Highlights */}
+          {/* Highlights */}
           <div className="space-y-2">
-            <label className="text-small font-medium text-primary">Impact Bullets (with metrics)</label>
+            <label className="text-small font-medium text-primary">Key Highlights & Metrics *</label>
             <div className="flex gap-2">
               <Input
-                placeholder="e.g. Reduced query latency by 45% via multi-tier caching..."
+                placeholder="e.g. Handled 10k requests/sec with P99 latency under 20ms..."
                 value={highlightInput}
                 onChange={(e) => setHighlightInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -324,7 +408,7 @@ export default function ProjectsPage() {
                 }}
               />
               <Button type="button" variant="outline" onClick={handleAddHighlight}>
-                Add Bullet
+                Add Highlight
               </Button>
             </div>
 
@@ -338,7 +422,7 @@ export default function ProjectsPage() {
                   <button
                     type="button"
                     onClick={() => handleRemoveHighlight(idx)}
-                    className="text-muted hover:text-status-error"
+                    className="text-muted hover:text-status-error shrink-0 mt-0.5"
                   >
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -347,12 +431,12 @@ export default function ProjectsPage() {
             </div>
           </div>
 
-          {/* Tech Stack Chips */}
+          {/* Tech Stack */}
           <div className="space-y-2">
-            <label className="text-small font-medium text-primary">Technologies Used</label>
+            <label className="text-small font-medium text-primary">Technologies Used *</label>
             <div className="flex gap-2">
               <Input
-                placeholder="e.g. TypeScript"
+                placeholder="e.g. Next.js, Rust, Redis"
                 value={techInput}
                 onChange={(e) => setTechInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -381,26 +465,57 @@ export default function ProjectsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Live URL (Optional)</label>
-              <Input placeholder="https://..." {...register("liveUrl")} />
+              <label className="text-small font-medium text-primary">Live Demo URL</label>
+              <Input
+                placeholder="https://..."
+                {...register("liveUrl")}
+                className={errors.liveUrl ? "border-status-error" : ""}
+              />
+              {errors.liveUrl && (
+                <p className="text-caption text-status-error">{errors.liveUrl.message}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Repo URL (Optional)</label>
-              <Input placeholder="https://github.com/..." {...register("repoUrl")} />
+              <label className="text-small font-medium text-primary">GitHub Repository URL</label>
+              <Input
+                placeholder="https://github.com/..."
+                {...register("repoUrl")}
+                className={errors.repoUrl ? "border-status-error" : ""}
+              />
+              {errors.repoUrl && (
+                <p className="text-caption text-status-error">{errors.repoUrl.message}</p>
+              )}
             </div>
           </div>
 
           <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
+            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              {editingId ? "Save Project" : "Add Project"}
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>{editingId ? "Save Changes" : "Add Project"}</span>
+              )}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(itemToDelete)}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Project"
+        description="Are you sure you want to delete this project from your Master Career Workspace? Existing targeted resume variants will not be affected."
+        itemName={itemToDelete?.name}
+      />
     </div>
   );
 }

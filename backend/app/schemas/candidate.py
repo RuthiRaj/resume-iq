@@ -45,6 +45,17 @@ class CertificationItem(BaseModel):
     issuer: str
 
 
+class AchievementItem(BaseModel):
+    id: Optional[str] = None
+    title: str
+    issuer: Optional[str] = ""
+    date: Optional[str] = ""
+    description: Optional[str] = ""
+    url: Optional[str] = ""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class CandidateEvidence(BaseModel):
     headline: Optional[str] = ""
     summary: str = ""
@@ -53,5 +64,6 @@ class CandidateEvidence(BaseModel):
     skills: List[SkillItem] = Field(default_factory=list)
     education: List[EducationItem] = Field(default_factory=list)
     certifications: List[CertificationItem] = Field(default_factory=list)
+    achievements: List[AchievementItem] = Field(default_factory=list)
 
     model_config = ConfigDict(populate_by_name=True)

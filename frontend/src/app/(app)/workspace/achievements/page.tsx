@@ -11,13 +11,35 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/common/state-views";
+import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
-import { Trophy, Plus, Pencil, Trash2, Calendar, ExternalLink } from "lucide-react";
+import {
+  Trophy,
+  Plus,
+  Pencil,
+  Trash2,
+  Calendar,
+  ExternalLink,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+} from "lucide-react";
 
 export default function AchievementsPage() {
-  const { achievements, addAchievement, updateAchievement, deleteAchievement } = useCareer();
+  const { achievements, addAchievement, updateAchievement, deleteAchievement, isLoaded } = useCareer();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
   const {
     register,
@@ -30,6 +52,7 @@ export default function AchievementsPage() {
 
   const handleOpenAdd = () => {
     setEditingId(null);
+    setSubmitError(null);
     reset({
       title: "",
       issuer: "",
@@ -42,21 +65,47 @@ export default function AchievementsPage() {
 
   const handleOpenEdit = (ach: AchievementData) => {
     setEditingId(ach.id || null);
+    setSubmitError(null);
     reset(ach);
     setIsModalOpen(true);
   };
 
-  const onSubmit = (data: AchievementData) => {
-    if (editingId) {
-      updateAchievement(editingId, data);
-    } else {
-      addAchievement(data);
+  const onSubmit = async (data: AchievementData) => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (editingId) {
+        await updateAchievement(editingId, data);
+        showToast("Achievement updated successfully.");
+      } else {
+        await addAchievement(data);
+        showToast("Achievement added successfully.");
+      }
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save achievement. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsModalOpen(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    await deleteAchievement(itemToDelete.id);
+    showToast("Achievement deleted from workspace.");
+    setItemToDelete(null);
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toastMessage && (
+        <div className="flex items-center gap-2 rounded-btn bg-status-success-soft px-4 py-2.5 text-status-success text-small font-medium border border-status-success/20 animate-in fade-in duration-200">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Honors, Awards & Publications</h2>
@@ -70,7 +119,19 @@ export default function AchievementsPage() {
         </Button>
       </div>
 
-      {achievements.length === 0 ? (
+      {!isLoaded ? (
+        <div className="space-y-4">
+          {[1, 2].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-5 space-y-3">
+                <div className="h-5 bg-border/60 rounded w-1/3" />
+                <div className="h-4 bg-border/40 rounded w-1/4" />
+                <div className="h-10 bg-border/30 rounded w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : achievements.length === 0 ? (
         <EmptyState
           title="No achievements added"
           description="Add hackathon victories, patent filings, or published papers."
@@ -95,10 +156,12 @@ export default function AchievementsPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 text-small text-muted pt-1">
-                      <Calendar className="h-3.5 w-3.5" />
-                      <span>{formatDate(ach.date)}</span>
-                    </div>
+                    {ach.date && (
+                      <div className="flex items-center gap-1.5 text-small text-muted pt-1">
+                        <Calendar className="h-3.5 w-3.5" />
+                        <span>{formatDate(ach.date)}</span>
+                      </div>
+                    )}
 
                     <p className="text-body text-secondary leading-relaxed">{ach.description}</p>
 
@@ -123,7 +186,13 @@ export default function AchievementsPage() {
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => ach.id && deleteAchievement(ach.id)}
+                      onClick={() =>
+                        ach.id &&
+                        setItemToDelete({
+                          id: ach.id,
+                          name: ach.title,
+                        })
+                      }
                       className="rounded-[4px] p-1.5 text-status-error hover:bg-status-error-soft"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -145,10 +214,17 @@ export default function AchievementsPage() {
         maxWidth="lg"
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {submitError && (
+            <div className="flex items-center gap-2 rounded-btn bg-status-error-soft p-3 text-status-error text-small font-medium border border-status-error/20">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Honor / Award Title</label>
+            <label className="text-small font-medium text-primary">Honor / Award Title *</label>
             <Input
-              placeholder="e.g. 1st Place Winner — Global AI Hackathon"
+              placeholder="e.g. 1st Place - Global AI Hackathon"
               {...register("title")}
               className={errors.title ? "border-status-error" : ""}
             />
@@ -159,9 +235,9 @@ export default function AchievementsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Awarding Entity / Event</label>
+              <label className="text-small font-medium text-primary">Issuing Organization *</label>
               <Input
-                placeholder="e.g. TechCrunch Disrupt 2024"
+                placeholder="e.g. OpenAI / TechCrunch"
                 {...register("issuer")}
                 className={errors.issuer ? "border-status-error" : ""}
               />
@@ -171,9 +247,9 @@ export default function AchievementsPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Date (YYYY-MM)</label>
+              <label className="text-small font-medium text-primary">Date (YYYY-MM) *</label>
               <Input
-                placeholder="2024-10"
+                placeholder="2023-11"
                 {...register("date")}
                 className={errors.date ? "border-status-error" : ""}
               />
@@ -184,10 +260,10 @@ export default function AchievementsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Description & Impact</label>
+            <label className="text-small font-medium text-primary">Description & Impact *</label>
             <Textarea
               rows={3}
-              placeholder="Describe the competitive pool, what you built or discovered, and key outcomes..."
+              placeholder="Describe the recognition, criteria, and significance..."
               {...register("description")}
               className={errors.description ? "border-status-error" : ""}
             />
@@ -197,20 +273,44 @@ export default function AchievementsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Reference URL (Optional)</label>
-            <Input placeholder="https://..." {...register("url")} />
+            <label className="text-small font-medium text-primary">Publication / Verification URL</label>
+            <Input
+              placeholder="https://..."
+              {...register("url")}
+              className={errors.url ? "border-status-error" : ""}
+            />
+            {errors.url && (
+              <p className="text-caption text-status-error">{errors.url.message}</p>
+            )}
           </div>
 
           <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
+            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              {editingId ? "Save Changes" : "Add Honor"}
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>{editingId ? "Save Changes" : "Add Honor"}</span>
+              )}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(itemToDelete)}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Honor / Award"
+        description="Are you sure you want to delete this achievement from your Master Career Workspace? Existing targeted resume variants will not be affected."
+        itemName={itemToDelete?.name}
+      />
     </div>
   );
 }

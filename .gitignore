@@ -54,3 +54,16 @@ backend/.env*.local
 # Vercel & Tooling
 .vercel
 *.tsbuildinfo
+
+# Archives & Temporary Artifacts
+/*.zip
+/cors.json
+/test-results/
+frontend/test-results/
+/playwright-report/
+frontend/playwright-report/
+/scratch/
+
+# Top-level duplicate/scratch evaluation folder (backend/evaluation/ remains tracked)
+/evaluation/
+*report*.json

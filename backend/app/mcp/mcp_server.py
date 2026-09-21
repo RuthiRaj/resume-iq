@@ -37,7 +37,9 @@ from app.mcp.auth import resolve_mcp_user
 from app.schemas.profile import ProfileDTO
 from app.schemas.variant import (
     CreateTargetedVariantRequest,
+    GenerateResumeRequest,
     ApplyVariantChangeRequest,
+    AiEditVariantRequest,
     RevertChangeRequest,
 )
 from app.schemas.remediation import SynthesizeBulletRequest
@@ -49,9 +51,16 @@ from app.services.resume_service import (
     _validate_safe_id as _rs_validate_id,
 )
 from app.services.variant_service import VariantService, _validate_safe_id as _vs_validate_id
+from app.services.resume_generation_service import ResumeGenerationService
 from app.ai.orchestrator import run_ats_analysis
 from app.ai.claim_validator import validate_claims_against_source
-from app.core.rate_limiter import ai_analysis_limiter, ai_synthesis_limiter, mutation_limiter
+from app.core.rate_limiter import (
+    ai_analysis_limiter,
+    ai_synthesis_limiter,
+    mutation_limiter,
+    resume_generation_limiter,
+    ai_edit_limiter,
+)
 from app.core.config import settings
 from app.core.security import sanitize_error_message
 
@@ -525,6 +534,48 @@ async def create_targeted_variant(
 
 
 @mcp.tool(
+    name="generate_resume",
+    description=(
+        "Generate a targeted resume variant for a target role (and optional job description) "
+        "by ranking workspace evidence and tailoring bullets via AI with strict anti-hallucination validation. "
+        "Rate-limited."
+    ),
+)
+async def generate_resume(
+    ctx: Context,
+    target_role: str,
+    target_company: Optional[str] = None,
+    job_description: Optional[str] = None,
+) -> dict:
+    user = resolve_mcp_user(ctx)
+    _guard_len(target_role, 150, "target_role")
+    if target_company:
+        _guard_len(target_company, 150, "target_company")
+    if job_description:
+        _guard_len(job_description, MAX_JD_LEN, "job_description")
+
+    try:
+        await resume_generation_limiter.check(user.uid)
+    except HTTPException as exc:
+        raise _http_to_mcp(exc, "Rate limit") from exc
+
+    try:
+        req = GenerateResumeRequest(
+            targetRole=target_role,
+            targetCompany=target_company or "",
+            jobDescription=job_description or "",
+        )
+        variant = await ResumeGenerationService.generate_role_targeted_resume(user, req)
+        return variant.model_dump(by_alias=True)
+    except MCPError:
+        raise
+    except HTTPException as exc:
+        raise _http_to_mcp(exc, "Resume generation") from exc
+    except Exception:
+        raise MCPError(INTERNAL_ERROR, "Failed to generate targeted resume.")
+
+
+@mcp.tool(
     name="get_targeted_variant",
     description="Retrieve a targeted resume variant with its full snapshot and change ledger.",
 )
@@ -540,6 +591,48 @@ async def get_targeted_variant(ctx: Context, variant_id: str) -> dict:
         raise _http_to_mcp(exc, "Variant") from exc
     except Exception:
         raise MCPError(INTERNAL_ERROR, "Failed to retrieve targeted variant.")
+
+@mcp.tool(
+    name="ai_edit_variant",
+    description=(
+        "Generate an unpersisted AI edit proposal for a single resume bullet or summary in a targeted variant. "
+        "Returns original text, proposed text, diff, and validation status. "
+        "Does not mutate the variant in the database."
+    ),
+)
+async def ai_edit_variant(
+    ctx: Context,
+    variant_id: str,
+    instruction: str,
+    target_item_id: str,
+    target_bullet_index: Optional[int] = None,
+    expected_version: Optional[int] = None,
+) -> dict:
+    user = resolve_mcp_user(ctx)
+    _validate_id(variant_id, "variant_id")
+    _guard_len(instruction, 1000, "instruction")
+    _validate_id(target_item_id, "target_item_id")
+
+    try:
+        await ai_edit_limiter.check(user.uid)
+    except HTTPException as exc:
+        raise _http_to_mcp(exc, "Rate limit") from exc
+
+    try:
+        req = AiEditVariantRequest(
+            instruction=instruction,
+            targetItemId=target_item_id,
+            targetBulletIndex=target_bullet_index,
+            expectedVersion=expected_version,
+        )
+        proposal = await VariantService.propose_ai_edit(user, variant_id, req)
+        return proposal.model_dump(by_alias=True)
+    except MCPError:
+        raise
+    except HTTPException as exc:
+        raise _http_to_mcp(exc, "AI edit") from exc
+    except Exception:
+        raise MCPError(INTERNAL_ERROR, "Failed to generate AI edit proposal.")
 
 
 @mcp.tool(

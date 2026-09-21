@@ -28,6 +28,7 @@ import {
   ExternalLink,
   Sparkles,
   Layers,
+  RefreshCw,
 } from "lucide-react";
 
 export default function ResumesPage() {
@@ -48,6 +49,14 @@ export default function ResumesPage() {
   const [variantJobDesc, setVariantJobDesc] = useState("");
   const [isCreatingVariant, setIsCreatingVariant] = useState(false);
   const [createVariantError, setCreateVariantError] = useState<string | null>(null);
+
+  // AI Generate Role Resume Modal State
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+  const [generateRole, setGenerateRole] = useState("");
+  const [generateCompany, setGenerateCompany] = useState("");
+  const [generateJobDesc, setGenerateJobDesc] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const filtered = resumes.filter(
     (r) =>
@@ -116,6 +125,54 @@ export default function ResumesPage() {
     }
   };
 
+  const handleGenerateResume = async () => {
+    if (!user) return;
+    if (!generateRole.trim()) {
+      setGenerateError("Target role is required.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenerateError(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/variants/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          targetRole: generateRole.trim(),
+          targetCompany: generateCompany.trim() || undefined,
+          jobDescription: generateJobDesc.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error("Generation rate limit reached. Please wait a moment before trying again.");
+        }
+        if (res.status === 504) {
+          throw new Error("AI generation timed out. Please retry with a shorter job description.");
+        }
+        throw new Error(data.detail || data.error || "Failed to generate targeted resume.");
+      }
+
+      setIsGenerateModalOpen(false);
+      const newVarId = data.variantId || data.variant_id;
+      if (newVarId) {
+        router.push(`/resumes/targeted/${newVarId}`);
+      }
+    } catch (err: any) {
+      setGenerateError(err.message || "Failed to generate targeted resume.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
@@ -123,11 +180,27 @@ export default function ResumesPage() {
         <div>
           <h1 className="text-h1 font-semibold text-primary">My Saved Resumes</h1>
           <p className="text-small text-secondary mt-0.5">
-            Manage target resume versions, fork targeted job variants, and run ATS audits.
+            Manage target resume versions, generate AI-tailored role variants, and run ATS audits.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setGenerateRole("");
+              setGenerateCompany("");
+              setGenerateJobDesc("");
+              setGenerateError(null);
+              setIsGenerateModalOpen(true);
+            }}
+            className="gap-1.5 border-accent/40 text-accent hover:bg-accent-soft shadow-subtle"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span>AI Generate Resume</span>
+          </Button>
+
           <Button
             variant="outline"
             size="sm"
@@ -140,10 +213,10 @@ export default function ResumesPage() {
               setCreateVariantError(null);
               setIsCreateVariantOpen(true);
             }}
-            className="gap-1.5 border-accent/40 text-accent hover:bg-accent-soft"
+            className="gap-1.5"
           >
-            <Sparkles className="h-4 w-4" />
-            <span>Fork Targeted Variant</span>
+            <Layers className="h-4 w-4 text-muted" />
+            <span>Fork Variant</span>
           </Button>
 
           <Link href="/builder">
@@ -526,6 +599,88 @@ export default function ResumesPage() {
                   <>
                     <Sparkles className="h-4 w-4" />
                     <span>Create & Open Workspace</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* AI Generate Role Resume Modal */}
+      {isGenerateModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsGenerateModalOpen(false)}
+          title="AI Generate Role-Targeted Resume"
+          description="Ranks your workspace career evidence and tailors bullets and executive summary with strict anti-hallucination verification."
+          maxWidth="lg"
+        >
+          <div className="space-y-4">
+            {generateError && (
+              <ErrorAlert message={generateError} />
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-small font-medium text-primary">Target Role *</label>
+                <Input
+                  placeholder="e.g. Senior Distributed Systems Engineer"
+                  value={generateRole}
+                  onChange={(e) => setGenerateRole(e.target.value)}
+                  disabled={isGenerating}
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-small font-medium text-primary">Target Company (Optional)</label>
+                <Input
+                  placeholder="e.g. Stripe, OpenAI, Google"
+                  value={generateCompany}
+                  onChange={(e) => setGenerateCompany(e.target.value)}
+                  disabled={isGenerating}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-small font-medium text-primary">Job Description (Optional)</label>
+              <Textarea
+                rows={6}
+                placeholder="Paste the target job description to optimize keyword alignment and ATS match scoring..."
+                value={generateJobDesc}
+                onChange={(e) => setGenerateJobDesc(e.target.value)}
+                disabled={isGenerating}
+              />
+              <p className="text-caption text-muted">
+                If provided, experience items and bullets will be selected and tailored specifically for this job description.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+              <Button
+                variant="ghost"
+                onClick={() => setIsGenerateModalOpen(false)}
+                disabled={isGenerating}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleGenerateResume}
+                disabled={isGenerating || !generateRole.trim()}
+                className="gap-1.5 shadow-subtle"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Generating Tailored Resume...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    <span>Generate Targeted Resume</span>
                   </>
                 )}
               </Button>

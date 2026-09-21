@@ -35,6 +35,7 @@ class ResumeViewModel(BaseModel):
     skills: List[str] = Field(default_factory=list)
     education: List[Dict[str, Any]] = Field(default_factory=list)
     certifications: List[Dict[str, Any]] = Field(default_factory=list)
+    achievements: List[Dict[str, Any]] = Field(default_factory=list)
     target_role: str = ""
     target_company: str = ""
 
@@ -264,6 +265,25 @@ class AtsTemplateRenderer(BasePdfRenderer):
                     cert_line += f" &mdash; {_clean_pdf_text(cert['issuer'])}"
                 story.append(Paragraph(cert_line, body_style))
                 story.append(Spacer(1, 3))
+            story.append(Spacer(1, 5))
+
+        # 8. Honors & Achievements
+        if vm.achievements:
+            story.append(Paragraph("HONORS & ACHIEVEMENTS", section_heading_style))
+            for ach in vm.achievements:
+                ach_elements = []
+                ach_title = f"<b>{_clean_pdf_text(ach.get('title', ''))}</b>"
+                if ach.get("issuer"):
+                    ach_title += f" &mdash; {_clean_pdf_text(ach['issuer'])}"
+                if ach.get("date"):
+                    ach_title += f" <font color='#6B7280'>({_clean_pdf_text(ach['date'])})</font>"
+                ach_elements.append(Paragraph(ach_title, item_title_style))
+
+                if ach.get("description"):
+                    ach_elements.append(Paragraph(_clean_pdf_text(ach["description"]), body_style))
+
+                ach_elements.append(Spacer(1, 4))
+                story.append(KeepTogether(ach_elements))
 
         # Build document
         doc.build(story)

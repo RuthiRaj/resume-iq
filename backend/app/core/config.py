@@ -17,8 +17,21 @@ class Settings(BaseSettings):
     # AI Analyzer Settings (Server-Side Only)
     AI_ANALYZER_PROVIDER: str = "groq"
     AI_ANALYZER_MODEL: str = "llama-3.3-70b-versatile"
+    AI_PROVIDER_CHAIN: str = "groq,gemini,nvidia"
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
+    NVIDIA_API_KEY: str = ""
+    NVIDIA_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
+    NVIDIA_MODEL: str = "meta/llama-3.2-11b-vision-instruct"
+
+    # Cloudinary (optional) — server-side backup storage for uploaded resume
+    # files. No credit card required on Cloudinary's free tier, unlike
+    # Firebase Storage (which requires the Blaze plan as of Feb 2026). If
+    # unset, ingestion/parsing still works fully; only the "view original
+    # file later" feature is unavailable. See app/services/cloud_storage_service.py.
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

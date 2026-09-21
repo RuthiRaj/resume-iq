@@ -51,4 +51,6 @@ class InMemoryRateLimiter:
 # Shared rate limiters for expensive operations
 ai_analysis_limiter = InMemoryRateLimiter(max_requests=25, window_seconds=60)
 ai_synthesis_limiter = InMemoryRateLimiter(max_requests=35, window_seconds=60)
+resume_generation_limiter = InMemoryRateLimiter(max_requests=5, window_seconds=60)
+ai_edit_limiter = InMemoryRateLimiter(max_requests=10, window_seconds=60)
 mutation_limiter = InMemoryRateLimiter(max_requests=50, window_seconds=60)

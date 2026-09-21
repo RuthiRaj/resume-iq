@@ -19,3 +19,11 @@ class AiAnalyzerProvider(Protocol):
         candidate_evidence: CandidateEvidence,
     ) -> AnalyzeResponse:
         ...
+
+    async def generate_json(
+        self,
+        system_instruction: str,
+        user_prompt: str,
+        schema_hint: Optional[str] = None,
+    ) -> dict:
+        ...

@@ -217,6 +217,139 @@ class GroqAnalyzerProvider:
     def name(self) -> str:
         return "groq"
 
+    @property
+    def model_name(self) -> str:
+        m = settings.AI_ANALYZER_MODEL
+        return m if (m and not m.startswith("nvidia/") and not m.startswith("gemini-")) else "llama-3.3-70b-versatile"
+
+    async def ping(self, timeout: float = 5.0) -> Dict[str, Any]:
+        """Runs a 1-token health ping with timeout, returning status and latency without leaking keys."""
+        api_key = settings.GROQ_API_KEY
+        if not api_key or api_key.strip() in ("", "your_server_side_groq_api_key_here"):
+            return {
+                "name": self.name,
+                "ok": False,
+                "latency_ms": None,
+                "error": "GROQ_API_KEY is not configured.",
+            }
+
+        model_name = settings.AI_ANALYZER_MODEL or "llama-3.3-70b-versatile"
+        client = get_shared_groq_client(api_key)
+        start = asyncio.get_event_loop().time()
+        try:
+            await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "ping"}],
+                    max_tokens=1,
+                ),
+                timeout=timeout,
+            )
+            latency_ms = round((asyncio.get_event_loop().time() - start) * 1000, 1)
+            return {
+                "name": self.name,
+                "ok": True,
+                "latency_ms": latency_ms,
+                "error": None,
+            }
+        except asyncio.TimeoutError:
+            latency_ms = round((asyncio.get_event_loop().time() - start) * 1000, 1)
+            return {
+                "name": self.name,
+                "ok": False,
+                "latency_ms": latency_ms,
+                "error": f"Groq ping timed out after {timeout}s",
+            }
+        except Exception as e:
+            latency_ms = round((asyncio.get_event_loop().time() - start) * 1000, 1)
+            return {
+                "name": self.name,
+                "ok": False,
+                "latency_ms": latency_ms,
+                "error": f"Groq ping failed: {type(e).__name__}",
+            }
+
+    async def generate_json(
+        self,
+        system_instruction: str,
+        user_prompt: str,
+        schema_hint: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        api_key = settings.GROQ_API_KEY
+        if not api_key or api_key.strip() in ("", "your_server_side_groq_api_key_here"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="GROQ_API_KEY is not configured on the backend server.",
+            )
+
+        m = settings.AI_ANALYZER_MODEL
+        model_name = m if (m and not m.startswith("nvidia/") and not m.startswith("gemini-")) else "llama-3.3-70b-versatile"
+        client = get_shared_groq_client(api_key)
+
+        prompt_body = user_prompt
+        if schema_hint:
+            prompt_body = f"{user_prompt}\n\nRequired JSON output format:\n{schema_hint}"
+
+        try:
+            chat_completion = await client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": prompt_body},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+            )
+            response_text = chat_completion.choices[0].message.content or ""
+        except Exception as e:
+            err_str = str(e)
+            if "timeout" in err_str.lower() or "timed out" in err_str.lower() or "deadline" in err_str.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="AI analysis service timed out after 60 seconds. Please try again.",
+                )
+            if "429" in err_str or "quota" in err_str.lower() or "rate_limit" in err_str.lower() or "rate limit" in err_str.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="AI provider rate limit reached. Please wait a moment before analyzing again.",
+                )
+            if "401" in err_str or "invalid_api_key" in err_str.lower() or "authentication" in err_str.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Invalid Groq API key configured on the backend server.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI analysis service encountered an error processing the request.",
+            )
+
+        if not response_text:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AI provider returned an empty response.",
+            )
+
+        clean_text = response_text.strip()
+        if clean_text.startswith("```"):
+            lines = clean_text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            clean_text = "\n".join(lines).strip()
+        first_brace = clean_text.find("{")
+        last_brace = clean_text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            clean_text = clean_text[first_brace : last_brace + 1]
+
+        try:
+            return json.loads(clean_text)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="AI provider returned an invalid JSON response format.",
+            )
+
     async def analyze(
         self,
         target_role: str,
@@ -232,7 +365,8 @@ class GroqAnalyzerProvider:
                 detail="GROQ_API_KEY is not configured on the backend server.",
             )
 
-        model_name = settings.AI_ANALYZER_MODEL or "openai/gpt-oss-120b"
+        m = settings.AI_ANALYZER_MODEL
+        model_name = m if (m and not m.startswith("nvidia/") and not m.startswith("gemini-")) else "llama-3.3-70b-versatile"
 
         client = get_shared_groq_client(api_key)
 

@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { CheckCircle2, Save, Plus, X, Globe, Linkedin, Github, RefreshCw, AlertCircle } from "lucide-react";
 
 export default function ProfilePage() {
-  const { profile, updateProfile } = useCareer();
+  const { profile, updateProfile, isLoaded } = useCareer();
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -32,10 +32,10 @@ export default function ProfilePage() {
   });
 
   React.useEffect(() => {
-    if (profile && !isDirty) {
+    if (profile && !isDirty && isLoaded) {
       reset(profile);
     }
-  }, [profile, reset, isDirty]);
+  }, [profile, reset, isDirty, isLoaded]);
 
   const targetRoles = watch("targetRoles") || [];
 
@@ -108,7 +108,12 @@ export default function ProfilePage() {
         )}
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form
+        onSubmit={handleSubmit(onSubmit, (errs) =>
+          setSaveError("Please fix: " + Object.keys(errs).join(", "))
+        )}
+        className="space-y-6"
+      >
         <Card>
           <CardHeader>
             <CardTitle>Contact & Identity</CardTitle>
@@ -198,6 +203,9 @@ export default function ProfilePage() {
                   {...register("website")}
                   className={errors.website ? "border-status-error" : ""}
                 />
+                {errors.website && (
+                  <p className="text-caption text-status-error">{errors.website.message}</p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -210,6 +218,9 @@ export default function ProfilePage() {
                   {...register("linkedin")}
                   className={errors.linkedin ? "border-status-error" : ""}
                 />
+                {errors.linkedin && (
+                  <p className="text-caption text-status-error">{errors.linkedin.message}</p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -222,6 +233,9 @@ export default function ProfilePage() {
                   {...register("github")}
                   className={errors.github ? "border-status-error" : ""}
                 />
+                {errors.github && (
+                  <p className="text-caption text-status-error">{errors.github.message}</p>
+                )}
               </div>
             </div>
           </CardContent>

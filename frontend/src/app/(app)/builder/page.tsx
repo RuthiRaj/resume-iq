@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 import { useCareer, ResumeItem, ResumeSnapshot } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
+import { ErrorAlert } from "@/components/common/state-views";
 import { ResumeUniversalRenderer } from "@/components/resume-templates/resume-renderer";
 import { LoadingState } from "@/components/common/state-views";
 import {
@@ -30,8 +32,10 @@ import {
 } from "lucide-react";
 
 function BuilderContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const resumeIdParam = searchParams.get("resumeId");
+  const { user } = useAuth();
 
   const {
     profile,
@@ -78,8 +82,38 @@ function BuilderContent() {
   const [isRegeneratingSection, setIsRegeneratingSection] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // AI Role Generate Modal State
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
+  const [generateRole, setGenerateRole] = useState(targetRole);
+  const [generateCompany, setGenerateCompany] = useState(targetCompany);
+  const [generateJobDesc, setGenerateJobDesc] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+
   // Active section tab in editor sidebar
   const [activeTab, setActiveTab] = useState<"summary" | "experience" | "projects" | "skills" | "template">("summary");
+
+  // Keep builder selection in sync with real-time career evidence updates
+  useEffect(() => {
+    if (!existingResume) {
+      if (experience.length > 0) {
+        setSelectedExpIds((prev) => {
+          const validIds = experience.map((e) => e.id || "").filter(Boolean);
+          const newIds = Array.from(new Set([...prev.filter((id) => validIds.includes(id)), ...validIds]));
+          return prev.length === newIds.length && prev.every((id, i) => id === newIds[i]) ? prev : newIds;
+        });
+      }
+      if (projects.length > 0) {
+        setSelectedProjIds((prev) => {
+          const validIds = projects.map((p) => p.id || "").filter(Boolean);
+          const newIds = Array.from(new Set([...prev.filter((id) => validIds.includes(id)), ...validIds]));
+          return prev.length === newIds.length && prev.every((id, i) => id === newIds[i]) ? prev : newIds;
+        });
+      }
+      setCustomSummary((prev) => prev || profile.summary);
+      setTargetRole((prev) => (prev === "Software Engineer" && profile.targetRoles?.[0] ? profile.targetRoles[0] : prev));
+    }
+  }, [experience, projects, profile.summary, profile.targetRoles, existingResume]);
 
   const handleRegenerateSummary = () => {
     setIsRegeneratingSection("summary");
@@ -154,6 +188,54 @@ function BuilderContent() {
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
+  const handleGenerateResume = async () => {
+    if (!user) return;
+    if (!generateRole.trim()) {
+      setGenerateError("Target role is required.");
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenerateError(null);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await fetch("/api/variants/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          targetRole: generateRole.trim(),
+          targetCompany: generateCompany.trim() || undefined,
+          jobDescription: generateJobDesc.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error("Generation rate limit reached. Please wait a moment before trying again.");
+        }
+        if (res.status === 504) {
+          throw new Error("AI generation timed out. Please retry with a shorter job description.");
+        }
+        throw new Error(data.detail || data.error || "Failed to generate targeted resume.");
+      }
+
+      setIsGenerateModalOpen(false);
+      const newVarId = data.variantId || data.variant_id;
+      if (newVarId) {
+        router.push(`/resumes/targeted/${newVarId}`);
+      }
+    } catch (err: any) {
+      setGenerateError(err.message || "Failed to generate targeted resume.");
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -207,17 +289,33 @@ function BuilderContent() {
             <Badge variant="accent">AI Tailoring Active</Badge>
           </div>
           <p className="text-small text-secondary mt-0.5">
-            Fine-tune sections, regenerate bullet points with targeted keywords, and preview in real-time.
+            Fine-tune sections, regenerate bullet points with targeted keywords, or generate full targeted variants.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 self-start sm:self-center">
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-center">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setGenerateRole(targetRole);
+              setGenerateCompany(targetCompany);
+              setGenerateJobDesc("");
+              setGenerateError(null);
+              setIsGenerateModalOpen(true);
+            }}
+            className="gap-1.5 border-accent/40 text-accent hover:bg-accent-soft shadow-subtle"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>AI Generate Role Resume</span>
+          </Button>
+
           <Button onClick={handlePrint} variant="outline" size="sm" className="gap-1.5">
             <Printer className="h-3.5 w-3.5" />
             <span>Print / Export PDF</span>
           </Button>
 
-          <Button onClick={handleSaveResume} variant="primary" size="sm" className="gap-1.5">
+          <Button onClick={handleSaveResume} variant="primary" size="sm" className="gap-1.5 shadow-subtle">
             <Save className="h-3.5 w-3.5" />
             <span>Save Resume</span>
           </Button>
@@ -483,6 +581,86 @@ function BuilderContent() {
           </div>
         </div>
       </div>
+
+      {/* AI Generate Role Resume Modal */}
+      {isGenerateModalOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setIsGenerateModalOpen(false)}
+          title="AI Generate Role-Targeted Resume"
+          description="Ranks your workspace career evidence and tailors bullets and executive summary with strict anti-hallucination verification."
+          maxWidth="lg"
+        >
+          <div className="space-y-4">
+            {generateError && <ErrorAlert message={generateError} />}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-small font-medium text-primary">Target Role *</label>
+                <Input
+                  placeholder="e.g. Senior Distributed Systems Engineer"
+                  value={generateRole}
+                  onChange={(e) => setGenerateRole(e.target.value)}
+                  disabled={isGenerating}
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-small font-medium text-primary">Target Company (Optional)</label>
+                <Input
+                  placeholder="e.g. Stripe, OpenAI, Google"
+                  value={generateCompany}
+                  onChange={(e) => setGenerateCompany(e.target.value)}
+                  disabled={isGenerating}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-small font-medium text-primary">Job Description (Optional)</label>
+              <Textarea
+                rows={6}
+                placeholder="Paste the target job description to optimize keyword alignment and ATS match scoring..."
+                value={generateJobDesc}
+                onChange={(e) => setGenerateJobDesc(e.target.value)}
+                disabled={isGenerating}
+              />
+              <p className="text-caption text-muted">
+                If provided, experience items and bullets will be selected and tailored specifically for this job description.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-border/60">
+              <Button
+                variant="ghost"
+                onClick={() => setIsGenerateModalOpen(false)}
+                disabled={isGenerating}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleGenerateResume}
+                disabled={isGenerating || !generateRole.trim()}
+                className="gap-1.5 shadow-subtle"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Generating Tailored Resume...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    <span>Generate Targeted Resume</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

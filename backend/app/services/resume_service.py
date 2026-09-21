@@ -12,6 +12,7 @@ from app.schemas.candidate import (
     SkillItem,
     EducationItem,
     CertificationItem,
+    AchievementItem,
 )
 from app.schemas.analyze import AnalyzeResponse
 
@@ -146,14 +147,15 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             pass
         return []
 
-    # Concurrent fetch across profile and all 5 subcollections
-    profile_data, exp_docs, proj_docs, skill_docs, edu_docs, cert_docs = await asyncio.gather(
+    # Concurrent fetch across profile and all 6 subcollections
+    profile_data, exp_docs, proj_docs, skill_docs, edu_docs, cert_docs, ach_docs = await asyncio.gather(
         _fetch_doc(f"{base_url}/profile/main"),
         _fetch_subcollection(f"{base_url}/experience"),
         _fetch_subcollection(f"{base_url}/projects"),
         _fetch_subcollection(f"{base_url}/skills"),
         _fetch_subcollection(f"{base_url}/education"),
         _fetch_subcollection(f"{base_url}/certifications"),
+        _fetch_subcollection(f"{base_url}/achievements"),
     )
 
     experience = [
@@ -208,6 +210,18 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
         for d in cert_docs
     ]
 
+    achievements = [
+        AchievementItem(
+            id=d.get("id", f"ach_{i}"),
+            title=d.get("title", ""),
+            issuer=d.get("issuer", ""),
+            date=d.get("date", ""),
+            description=d.get("description", ""),
+            url=d.get("url", ""),
+        )
+        for i, d in enumerate(ach_docs)
+    ]
+
     return CandidateEvidence(
         headline=profile_data.get("headline", ""),
         summary=profile_data.get("summary", ""),
@@ -216,6 +230,7 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
         skills=skills,
         education=education,
         certifications=certifications,
+        achievements=achievements,
     )
 
 
@@ -304,6 +319,17 @@ async def get_candidate_resume_data(
             )
             for c in snapshot.get("certifications", [])
         ]
+        achievements = [
+            AchievementItem(
+                id=a.get("id"),
+                title=a.get("title", ""),
+                issuer=a.get("issuer", ""),
+                date=a.get("date", ""),
+                description=a.get("description", ""),
+                url=a.get("url", ""),
+            )
+            for a in snapshot.get("achievements", [])
+        ]
 
         return CandidateEvidence(
             headline=profile.get("headline", ""),
@@ -313,6 +339,7 @@ async def get_candidate_resume_data(
             skills=skills,
             education=education,
             certifications=certifications,
+            achievements=achievements,
         )
 
     # Priority 2: Legacy fallback

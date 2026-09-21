@@ -33,6 +33,7 @@ class IngestionDraft(BaseModel):
     raw_text_char_count: int = Field(default=0, alias="rawTextCharCount", description="Character count of extracted text")
     parsed_data: Optional[ParsedCandidateProfile] = Field(default=None, alias="parsedData", description="Structured candidate profile")
     error_message: Optional[str] = Field(default=None, alias="errorMessage", description="Failure reason if parsing failed")
+    file_url: Optional[str] = Field(default=None, alias="fileUrl", description="Publicly resolvable URL of the stored original document (Cloudinary), if the backup upload succeeded")
     created_at: str = Field(..., alias="createdAt", description="ISO 8601 creation timestamp")
     updated_at: str = Field(..., alias="updatedAt", description="ISO 8601 update timestamp")
     completed_at: Optional[str] = Field(default=None, alias="completedAt", description="ISO 8601 timestamp when draft was confirmed & imported")
