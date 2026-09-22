@@ -2,6 +2,20 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  async redirects() {
+    return [
+      {
+        source: "/signup",
+        destination: "/register",
+        permanent: true,
+      },
+      {
+        source: "/signin",
+        destination: "/login",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
