@@ -2,7 +2,7 @@ import re
 import uuid
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, Set
 from fastapi import HTTPException, status
 from app.core.auth import AuthenticatedUser
 from app.schemas.candidate import (

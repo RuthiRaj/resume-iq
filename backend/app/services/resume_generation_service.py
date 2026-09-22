@@ -1,7 +1,7 @@
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Set, Any
+from typing import Optional, List, Dict, Set, Any, Tuple
 from fastapi import HTTPException, status
 
 from app.core.auth import AuthenticatedUser
@@ -137,7 +137,7 @@ def rank_and_select_evidence(
     job_description: Optional[str] = "",
     max_experience: int = 5,
     max_projects: int = 4,
-) -> TupleEvidence:
+) -> Tuple[List[ExperienceItem], List[ProjectItem], List[SkillItem]]:
     """
     Deterministically ranks and selects top candidate experiences, projects, and skills
     based on keyword overlap with target_role and optional job_description.
@@ -190,11 +190,6 @@ def rank_and_select_evidence(
     selected_skills = [x[2] for x in scored_skills]
 
     return selected_exp, selected_proj, selected_skills
-
-
-class TupleEvidence:
-    """Helper type annotation for tuple return."""
-    pass
 
 
 class ResumeGenerationService:
