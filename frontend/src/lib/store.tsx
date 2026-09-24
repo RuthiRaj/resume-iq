@@ -226,6 +226,126 @@ export interface CandidateEvidenceData {
   }>;
 }
 
+export interface SectionPlanData {
+  sectionName: string;
+  section_name?: string;
+  included: boolean;
+  selectedEvidenceIds?: string[];
+  selected_evidence_ids?: string[];
+  priority: number;
+  order: number;
+  rationale: string;
+}
+
+export interface SelectedEvidenceData {
+  evidenceId: string;
+  evidence_id?: string;
+  sourceType: string;
+  source_type?: string;
+  sourceItemId: string;
+  source_item_id?: string;
+  title: string;
+  rankScore: number;
+  rank_score?: number;
+  selectionReason: string;
+  selection_reason?: string;
+  matchedSkills?: string[];
+  matched_skills?: string[];
+}
+
+export interface ExcludedEvidenceData {
+  evidenceId: string;
+  evidence_id?: string;
+  sourceType: string;
+  source_type?: string;
+  sourceItemId: string;
+  source_item_id?: string;
+  title: string;
+  rankScore: number;
+  rank_score?: number;
+  exclusionReason: string;
+  exclusion_reason?: string;
+}
+
+export interface PrioritizedSkillData {
+  name: string;
+  category: string;
+  importance: "MustHave" | "Preferred" | "Unspecified";
+  matchClass?: string;
+  match_class?: string;
+  isDirectlyDemonstrated: boolean;
+  is_directly_demonstrated?: boolean;
+  evidenceIds?: string[];
+  evidence_ids?: string[];
+}
+
+export interface HardGapData {
+  requirementName: string;
+  requirement_name?: string;
+  category: string;
+  gapType: string;
+  gap_type?: string;
+  reason: string;
+  prohibitedClaimInstruction: string;
+  prohibited_claim_instruction?: string;
+}
+
+export interface RequirementStrategyData {
+  focusAreas?: string[];
+  focus_areas?: string[];
+  summaryTheme?: string;
+  summary_theme?: string;
+  highlightedDomains?: string[];
+  highlighted_domains?: string[];
+  notes?: string[];
+}
+
+export interface ResumePlanData {
+  planId: string;
+  plan_id?: string;
+  userId?: string;
+  user_id?: string;
+  targetRole: string;
+  target_role?: string;
+  targetCompany?: string;
+  target_company?: string;
+  targetPageBudget: number;
+  target_page_budget?: number;
+  sectionOrder?: string[];
+  section_order?: string[];
+  sections?: SectionPlanData[];
+  selectedEvidence?: SelectedEvidenceData[];
+  selected_evidence?: SelectedEvidenceData[];
+  excludedEvidence?: ExcludedEvidenceData[];
+  excluded_evidence?: ExcludedEvidenceData[];
+  prioritizedSkills?: PrioritizedSkillData[];
+  prioritized_skills?: PrioritizedSkillData[];
+  prioritizedKeywords?: string[];
+  prioritized_keywords?: string[];
+  requirementStrategy?: RequirementStrategyData;
+  requirement_strategy?: RequirementStrategyData;
+  hardGaps?: HardGapData[];
+  hard_gaps?: HardGapData[];
+  relatedButUnverifiedRequirements?: string[];
+  related_but_unverified_requirements?: string[];
+  userConfirmationRequired?: string[];
+  user_confirmation_required?: string[];
+  planningMetadata?: Record<string, any>;
+  planning_metadata?: Record<string, any>;
+  createdAt?: string;
+  created_at?: string;
+}
+
+export interface GenerationMetadataData {
+  provider?: string;
+  model?: string;
+  generatedAt?: string;
+  generated_at?: string;
+  failover_log?: any[];
+  plan?: ResumePlanData;
+  [key: string]: any;
+}
+
 export interface TargetedResumeVariant {
   variantId: string;
   variant_id?: string;
@@ -260,12 +380,24 @@ export interface TargetedResumeVariant {
   snapshot: CandidateEvidenceData;
   changeLedger?: ChangeRecordData[];
   change_ledger?: ChangeRecordData[];
+  provider?: string;
+  model?: string;
+  generationMetadata?: GenerationMetadataData;
+  generation_metadata?: GenerationMetadataData;
   createdAt?: string;
   created_at?: string;
   updatedAt?: string;
   updated_at?: string;
 }
 
+export type SectionPlan = SectionPlanData;
+export type SelectedEvidenceItem = SelectedEvidenceData;
+export type ExcludedEvidenceItem = ExcludedEvidenceData;
+export type PrioritizedSkill = PrioritizedSkillData;
+export type HardGap = HardGapData;
+export type RequirementStrategy = RequirementStrategyData;
+export type ResumePlan = ResumePlanData;
+export type GenerationMetadata = GenerationMetadataData;
 export type ChangeRecord = ChangeRecordData;
 export type RequirementProgression = RequirementProgressionData;
 export type FitComparisonResponse = FitComparisonData;

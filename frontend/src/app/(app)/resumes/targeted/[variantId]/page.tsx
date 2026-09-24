@@ -77,7 +77,7 @@ export default function TargetedResumeWorkspacePage() {
 
   const [variant, setVariant] = useState<TargetedResumeVariant | null>(null);
   const [fitComparison, setFitComparison] = useState<FitComparisonResponse | null>(null);
-  const [activeTab, setActiveTab] = useState<"snapshot" | "ledger" | "comparison">("snapshot");
+  const [activeTab, setActiveTab] = useState<"snapshot" | "strategy" | "ledger" | "comparison">("snapshot");
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -663,6 +663,7 @@ export default function TargetedResumeWorkspacePage() {
   const currentScoreVal = variant.currentScore ?? variant.current_score ?? variant.baselineScore ?? variant.baseline_score ?? 0;
   const scoreDeltaVal = variant.scoreDelta ?? variant.score_delta;
   const activeBreakdown = variant.currentBreakdown || variant.current_breakdown || variant.baselineBreakdown || variant.baseline_breakdown;
+  const plan = variant.generationMetadata?.plan || variant.generation_metadata?.plan;
 
   return (
     <div className="space-y-6 pb-12">
@@ -837,6 +838,27 @@ export default function TargetedResumeWorkspacePage() {
         >
           <FileText className="h-4 w-4" />
           <span>Resume Snapshot & Editor</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab("strategy")}
+          className={`px-4 py-2.5 text-small font-semibold border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap shrink-0 ${
+            activeTab === "strategy"
+              ? "border-accent text-accent"
+              : "border-transparent text-secondary hover:text-primary"
+          }`}
+        >
+          <Sparkles className="h-4 w-4" />
+          <span>Targeting Strategy & Plan</span>
+          {plan ? (
+            <Badge variant="outline" className="ml-1 text-[10px] px-1.5 py-0.2 border-accent/40 text-accent bg-accent/5">
+              {plan.targetPageBudget ?? plan.target_page_budget ?? 1}p Plan
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="ml-1 text-[10px] px-1.5 py-0.2">
+              Legacy
+            </Badge>
+          )}
         </button>
 
         <button
@@ -1207,7 +1229,615 @@ export default function TargetedResumeWorkspacePage() {
         </div>
       )}
 
-      {/* Tab 2: Change History & Ledger */}
+      {/* Tab 2: Targeting Strategy & Plan */}
+      {activeTab === "strategy" && (
+        <div className="space-y-6">
+          {!plan ? (
+            <Card className="border-border shadow-subtle p-8 text-center bg-surface">
+              <EmptyState
+                title="Targeting Strategy & Plan Not Available"
+                description="This targeted resume variant was created prior to the deterministic ResumePlan layer. Subsequent variants will automatically include complete section planning, evidence selection rationales, prioritized skills, and anti-hallucination guardrails."
+                icon={Layers}
+              />
+            </Card>
+          ) : (
+            <div className="space-y-6">
+              {/* Header / Strategy Metadata Summary */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-h2 font-semibold text-primary">Targeting Strategy & Resume Plan</h3>
+                    <Badge variant="outline" className="text-xs bg-accent/10 border-accent/30 text-accent font-mono">
+                      {plan.planId || plan.plan_id || "plan_default"}
+                    </Badge>
+                  </div>
+                  <p className="text-small text-secondary pt-0.5">
+                    Deterministic planning decisions bridging candidate workspace evidence with job requirements.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-xs px-2.5 py-1 font-medium">
+                    Page Budget: {plan.targetPageBudget ?? plan.target_page_budget ?? 1} Page{(plan.targetPageBudget ?? plan.target_page_budget ?? 1) > 1 ? "s" : ""}
+                  </Badge>
+                  {(variant.provider || variant.generationMetadata?.provider) && (
+                    <Badge variant="outline" className="text-xs px-2.5 py-1 text-muted">
+                      Engine: {variant.provider || variant.generationMetadata?.provider}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              {/* Top Metrics Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <Card className="p-4 border-border shadow-subtle space-y-1">
+                  <span className="text-caption text-muted font-semibold uppercase">Page Budget</span>
+                  <div className="text-2xl font-bold text-primary">
+                    {plan.targetPageBudget ?? plan.target_page_budget ?? 1} Page{(plan.targetPageBudget ?? plan.target_page_budget ?? 1) > 1 ? "s" : ""}
+                  </div>
+                  <p className="text-caption text-secondary">Strict ATS length constraint</p>
+                </Card>
+
+                <Card className="p-4 border-border shadow-subtle space-y-1">
+                  <span className="text-caption text-muted font-semibold uppercase">Selected Evidence</span>
+                  <div className="text-2xl font-bold text-status-success">
+                    {(plan.selectedEvidence || plan.selected_evidence || []).length}
+                  </div>
+                  <p className="text-caption text-secondary">Grounded workspace items included</p>
+                </Card>
+
+                <Card className="p-4 border-border shadow-subtle space-y-1">
+                  <span className="text-caption text-muted font-semibold uppercase">Excluded Evidence</span>
+                  <div className="text-2xl font-bold text-muted">
+                    {(plan.excludedEvidence || plan.excluded_evidence || []).length}
+                  </div>
+                  <p className="text-caption text-secondary">Filtered out for relevance/budget</p>
+                </Card>
+
+                <Card className="p-4 border-border shadow-subtle space-y-1">
+                  <span className="text-caption text-muted font-semibold uppercase">Hard Gaps</span>
+                  <div className="text-2xl font-bold text-amber-500">
+                    {(plan.hardGaps || plan.hard_gaps || []).length}
+                  </div>
+                  <p className="text-caption text-secondary">Anti-hallucination constraints</p>
+                </Card>
+              </div>
+
+              {/* Strategic Theme & Requirement Directives */}
+              {(() => {
+                const strategy = plan.requirementStrategy || plan.requirement_strategy || {};
+                const focusAreas = strategy.focusAreas || strategy.focus_areas || [];
+                const summaryTheme = strategy.summaryTheme || strategy.summary_theme;
+                const highlightedDomains = strategy.highlightedDomains || strategy.highlighted_domains || [];
+                const notes = strategy.notes || [];
+
+                return (
+                  <Card className="border-border shadow-subtle bg-surface divide-y divide-border/60">
+                    <div className="p-5 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="h-4 w-4 text-accent" />
+                        <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                          Executive Narrative & Role Positioning Strategy
+                        </h4>
+                      </div>
+
+                      {summaryTheme && (
+                        <div className="p-3.5 rounded-btn bg-accent-soft/30 border border-accent/20 space-y-1">
+                          <span className="text-caption font-semibold uppercase tracking-wider text-accent">
+                            Positioning Narrative Theme
+                          </span>
+                          <p className="text-body text-primary font-medium leading-relaxed">
+                            &ldquo;{summaryTheme}&rdquo;
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                        {focusAreas.length > 0 && (
+                          <div className="space-y-1.5">
+                            <span className="text-caption font-semibold text-muted uppercase">
+                              Core Focus Areas
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {focusAreas.map((area: string, i: number) => (
+                                <Badge key={i} variant="outline" className="bg-page text-primary text-xs py-1">
+                                  {area}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {highlightedDomains.length > 0 && (
+                          <div className="space-y-1.5">
+                            <span className="text-caption font-semibold text-muted uppercase">
+                              Target Technical & Industry Domains
+                            </span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {highlightedDomains.map((domain: string, i: number) => (
+                                <Badge key={i} variant="secondary" className="text-xs py-1">
+                                  {domain}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {notes.length > 0 && (
+                        <div className="pt-2 space-y-1">
+                          <span className="text-caption font-semibold text-muted uppercase">
+                            Strategic Directives & Planning Notes
+                          </span>
+                          <ul className="space-y-1 text-small text-secondary list-disc list-inside">
+                            {notes.map((note: string, i: number) => (
+                              <li key={i}>{note}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* Section Architecture & Ordering */}
+              {(() => {
+                const sections = plan.sections || [];
+                const sectionOrder = plan.sectionOrder || plan.section_order || [];
+                const sortedSections = [...sections].sort((a, b) => (a.order || 0) - (b.order || 0));
+
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Layers className="h-4 w-4 text-accent" />
+                        <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                          Section Architecture & Layout Hierarchy
+                        </h4>
+                      </div>
+                      {sectionOrder.length > 0 && (
+                        <span className="text-caption text-muted">
+                          {sectionOrder.length} planned sections
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {sortedSections.map((sec, idx) => {
+                        const secName = sec.sectionName || sec.section_name;
+                        const evidenceIds = sec.selectedEvidenceIds || sec.selected_evidence_ids || [];
+                        return (
+                          <Card key={idx} className="p-4 border-border shadow-subtle bg-surface space-y-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="flex items-center justify-center w-5 h-5 rounded-full bg-page border border-border text-caption font-bold text-muted">
+                                  {sec.order || idx + 1}
+                                </span>
+                                <h5 className="text-body font-bold text-primary">{secName}</h5>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Badge variant={sec.included ? "success" : "secondary"} className="text-[10px]">
+                                  {sec.included ? "Included" : "Omitted"}
+                                </Badge>
+                                <Badge variant="outline" className="text-[10px]">
+                                  Priority #{sec.priority}
+                                </Badge>
+                              </div>
+                            </div>
+
+                            {sec.rationale && (
+                              <p className="text-small text-secondary leading-relaxed">
+                                {sec.rationale}
+                              </p>
+                            )}
+
+                            {evidenceIds.length > 0 && (
+                              <div className="flex items-center gap-1.5 text-caption text-muted pt-1 border-t border-border/50">
+                                <FileCheck className="h-3.5 w-3.5 text-status-success" />
+                                <span>{evidenceIds.length} grounded evidence items allocated</span>
+                              </div>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Prioritized Skills & Keywords Matrix */}
+              {(() => {
+                const skills = plan.prioritizedSkills || plan.prioritized_skills || [];
+                const keywords = plan.prioritizedKeywords || plan.prioritized_keywords || [];
+                const unverifiedReqs = plan.relatedButUnverifiedRequirements || plan.related_but_unverified_requirements || [];
+                const userConfirmation = plan.userConfirmationRequired || plan.user_confirmation_required || [];
+
+                const mustHaveSkills = skills.filter((s) => s.importance === "MustHave");
+                const preferredSkills = skills.filter((s) => s.importance !== "MustHave");
+
+                return (
+                  <Card className="border-border shadow-subtle bg-surface divide-y divide-border/60">
+                    <div className="p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Code2 className="h-4 w-4 text-accent" />
+                          <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                            Prioritized Skills & ATS Keyword Targeting ({skills.length} Skills)
+                          </h4>
+                        </div>
+                      </div>
+
+                      {/* Must-Have Skills */}
+                      {mustHaveSkills.length > 0 && (
+                        <div className="space-y-2">
+                          <span className="text-caption font-semibold text-amber-600 dark:text-amber-400 uppercase flex items-center gap-1">
+                            Must-Have Core Competencies ({mustHaveSkills.length})
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                            {mustHaveSkills.map((sk, i) => {
+                              const matchClass = sk.matchClass || sk.match_class || "direct_match";
+                              const isDemonstrated = sk.isDirectlyDemonstrated ?? sk.is_directly_demonstrated ?? true;
+                              const evidenceCount = (sk.evidenceIds || sk.evidence_ids || []).length;
+                              return (
+                                <div
+                                  key={i}
+                                  className="p-2.5 rounded-btn border border-border/80 bg-page/50 flex flex-col justify-between gap-1.5"
+                                >
+                                  <div className="flex items-start justify-between gap-1">
+                                    <strong className="text-small font-semibold text-primary">{sk.name}</strong>
+                                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 uppercase">
+                                      {sk.category}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center justify-between text-caption pt-1 border-t border-border/40">
+                                    <span className="text-secondary text-[11px] capitalize">
+                                      {matchClass.replace(/_/g, " ")}
+                                    </span>
+                                    <span className={isDemonstrated ? "text-status-success font-medium flex items-center gap-0.5" : "text-amber-500 font-medium flex items-center gap-0.5"}>
+                                      {isDemonstrated ? (
+                                        <>
+                                          <CheckCircle2 className="h-3 w-3" />
+                                          {evidenceCount > 0 ? `${evidenceCount} Evidence` : "Demonstrated"}
+                                        </>
+                                      ) : (
+                                        <>
+                                          <AlertTriangle className="h-3 w-3" />
+                                          Tag Only
+                                        </>
+                                      )}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Preferred Skills */}
+                      {preferredSkills.length > 0 && (
+                        <div className="space-y-2 pt-2">
+                          <span className="text-caption font-semibold text-secondary uppercase">
+                            Preferred / Secondary Skills ({preferredSkills.length})
+                          </span>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                            {preferredSkills.map((sk, i) => {
+                              const matchClass = sk.matchClass || sk.match_class || "direct_match";
+                              const isDemonstrated = sk.isDirectlyDemonstrated ?? sk.is_directly_demonstrated ?? true;
+                              return (
+                                <div
+                                  key={i}
+                                  className="p-2.5 rounded-btn border border-border/60 bg-page/30 flex flex-col justify-between gap-1.5"
+                                >
+                                  <div className="flex items-start justify-between gap-1">
+                                    <span className="text-small font-medium text-primary">{sk.name}</span>
+                                    <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                                      {sk.category}
+                                    </Badge>
+                                  </div>
+                                  <div className="flex items-center justify-between text-caption pt-1 border-t border-border/30">
+                                    <span className="text-muted text-[11px] capitalize">
+                                      {matchClass.replace(/_/g, " ")}
+                                    </span>
+                                    <span className="text-muted text-[11px]">
+                                      {isDemonstrated ? "Demonstrated" : "Unverified"}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Target ATS Keywords */}
+                      {keywords.length > 0 && (
+                        <div className="space-y-2 pt-2">
+                          <span className="text-caption font-semibold text-muted uppercase">
+                            Target ATS Keyword Index ({keywords.length})
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {keywords.map((kw, i) => (
+                              <Badge key={i} variant="outline" className="bg-page text-secondary text-caption py-0.5">
+                                {kw}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Candidate Confirmation & Unverified Warnings */}
+                      {(userConfirmation.length > 0 || unverifiedReqs.length > 0) && (
+                        <div className="space-y-2 pt-3 border-t border-border/60">
+                          {userConfirmation.length > 0 && (
+                            <div className="p-3 rounded-btn bg-amber-500/10 border border-amber-500/30 text-small text-amber-600 dark:text-amber-400 space-y-1">
+                              <div className="flex items-center gap-1.5 font-semibold">
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                <span>Standalone Skills Requiring Project Evidence ({userConfirmation.length})</span>
+                              </div>
+                              <p className="text-caption">
+                                The following skills are listed in your workspace profile tags but lack supporting work or project bullet narratives:
+                              </p>
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {userConfirmation.map((s, i) => (
+                                  <Badge key={i} variant="outline" className="border-amber-500/40 text-amber-600 dark:text-amber-400 text-xs">
+                                    {s}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {unverifiedReqs.length > 0 && (
+                            <div className="p-3 rounded-btn bg-indigo-500/10 border border-indigo-500/30 text-small text-indigo-600 dark:text-indigo-400 space-y-1">
+                              <div className="flex items-center gap-1.5 font-semibold">
+                                <BookOpen className="h-4 w-4 shrink-0" />
+                                <span>Related Adjacent Experience Identified ({unverifiedReqs.length})</span>
+                              </div>
+                              <p className="text-caption">
+                                You have related foundational experience for these requirements, though exact direct match evidence was not found:
+                              </p>
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {unverifiedReqs.map((s, i) => (
+                                  <Badge key={i} variant="outline" className="border-indigo-500/40 text-indigo-600 dark:text-indigo-400 text-xs">
+                                    {s}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })()}
+
+              {/* Selected vs. Excluded Evidence Decision Breakdown */}
+              {(() => {
+                const selected = plan.selectedEvidence || plan.selected_evidence || [];
+                const excluded = plan.excludedEvidence || plan.excluded_evidence || [];
+
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Selected Evidence Column */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-status-success" />
+                          <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                            Selected Evidence Items ({selected.length})
+                          </h4>
+                        </div>
+                        <Badge variant="success" className="text-[10px]">
+                          Grounded in Resume
+                        </Badge>
+                      </div>
+
+                      {selected.length === 0 ? (
+                        <p className="text-small text-muted italic p-4 border border-border rounded-card bg-surface">
+                          No evidence items selected.
+                        </p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {selected.map((item, idx) => {
+                            const matchedSkills = item.matchedSkills || item.matched_skills || [];
+                            const score = Math.round((item.rankScore ?? item.rank_score ?? 0) * 100);
+                            return (
+                              <Card key={idx} className="p-4 border-border shadow-subtle bg-surface space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <Badge variant="secondary" className="text-[10px]">
+                                        {item.sourceType || item.source_type}
+                                      </Badge>
+                                      <strong className="text-small font-bold text-primary">
+                                        {item.title || item.evidenceId || item.evidence_id}
+                                      </strong>
+                                    </div>
+                                    <span className="text-caption font-mono text-muted text-[11px] block">
+                                      {item.evidenceId || item.evidence_id}
+                                    </span>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <Badge variant="outline" className="text-xs font-semibold text-status-success border-status-success/30 bg-status-success-soft/30">
+                                      Score {score}%
+                                    </Badge>
+                                  </div>
+                                </div>
+
+                                {(item.selectionReason || item.selection_reason) && (
+                                  <p className="text-small text-secondary bg-page/40 p-2 rounded border border-border/40 leading-relaxed">
+                                    <span className="font-semibold text-primary">Selection Rationale: </span>
+                                    {item.selectionReason || item.selection_reason}
+                                  </p>
+                                )}
+
+                                {matchedSkills.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1 pt-1">
+                                    <span className="text-caption text-muted">Matched:</span>
+                                    {matchedSkills.map((sk, sIdx) => (
+                                      <Badge key={sIdx} variant="outline" className="text-[10px] bg-page text-primary py-0">
+                                        {sk}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Excluded Evidence Column */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <XCircle className="h-4 w-4 text-muted" />
+                          <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                            Excluded Workspace Evidence ({excluded.length})
+                          </h4>
+                        </div>
+                        <Badge variant="secondary" className="text-[10px]">
+                          Filtered Out
+                        </Badge>
+                      </div>
+
+                      {excluded.length === 0 ? (
+                        <p className="text-small text-muted italic p-4 border border-border rounded-card bg-surface">
+                          No candidate evidence was excluded.
+                        </p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {excluded.map((item, idx) => {
+                            const score = Math.round((item.rankScore ?? item.rank_score ?? 0) * 100);
+                            return (
+                              <Card key={idx} className="p-4 border-border shadow-subtle bg-surface space-y-2 opacity-85 hover:opacity-100 transition-opacity">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <Badge variant="outline" className="text-[10px]">
+                                        {item.sourceType || item.source_type}
+                                      </Badge>
+                                      <span className="text-small font-semibold text-secondary">
+                                        {item.title || item.evidenceId || item.evidence_id}
+                                      </span>
+                                    </div>
+                                    <span className="text-caption font-mono text-muted text-[11px] block">
+                                      {item.evidenceId || item.evidence_id}
+                                    </span>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <span className="text-caption text-muted font-mono">
+                                      Score {score}%
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {(item.exclusionReason || item.exclusion_reason) && (
+                                  <p className="text-small text-muted bg-page/30 p-2 rounded border border-border/30 leading-relaxed">
+                                    <span className="font-semibold text-secondary">Exclusion Reason: </span>
+                                    {item.exclusionReason || item.exclusion_reason}
+                                  </p>
+                                )}
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Hard Gaps & Anti-Hallucination Directives */}
+              {(() => {
+                const hardGaps = plan.hardGaps || plan.hard_gaps || [];
+
+                return (
+                  <Card className="border-border shadow-subtle bg-surface divide-y divide-border/60">
+                    <div className="p-5 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="h-4 w-4 text-status-success" />
+                          <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                            Anti-Hallucination Gate & Hard Gap Directives ({hardGaps.length})
+                          </h4>
+                        </div>
+                        <Badge variant="outline" className="border-accent/30 text-accent bg-accent/5 text-[10px]">
+                          Negative Constraint Enforcement
+                        </Badge>
+                      </div>
+
+                      <p className="text-small text-secondary leading-relaxed">
+                        ResumeIQ enforces strict anti-hallucination boundaries. The requirements below were identified as unmet by workspace evidence, and generation engines were explicitly forbidden from fabricating or claiming unverified competence.
+                      </p>
+
+                      {hardGaps.length === 0 ? (
+                        <div className="p-4 rounded-btn bg-status-success-soft/20 border border-status-success/30 flex items-center gap-2 text-small text-status-success">
+                          <CheckCircle2 className="h-4 w-4 shrink-0" />
+                          <span>All core job requirements were substantiated by verified candidate workspace evidence. No hard gap constraints triggered.</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {hardGaps.map((gap, idx) => {
+                            const reqName = gap.requirementName || gap.requirement_name;
+                            const gapType = gap.gapType || gap.gap_type;
+                            const instruction = gap.prohibitedClaimInstruction || gap.prohibited_claim_instruction;
+
+                            return (
+                              <div
+                                key={idx}
+                                className="p-4 rounded-card border border-amber-500/30 bg-page space-y-2.5"
+                              >
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <strong className="text-body font-bold text-primary">{reqName}</strong>
+                                    <Badge variant="outline" className="text-[10px]">
+                                      {gap.category}
+                                    </Badge>
+                                    <Badge variant="secondary" className="text-[10px] text-amber-600">
+                                      {gapType}
+                                    </Badge>
+                                  </div>
+                                </div>
+
+                                {gap.reason && (
+                                  <p className="text-small text-secondary leading-relaxed">
+                                    <span className="font-semibold text-primary">Factual Analysis: </span>
+                                    {gap.reason}
+                                  </p>
+                                )}
+
+                                {instruction && (
+                                  <div className="p-3 rounded-btn bg-status-error-soft/20 border border-status-error/30 flex items-start gap-2">
+                                    <XCircle className="h-4 w-4 text-status-error shrink-0 mt-0.5" />
+                                    <div className="space-y-0.5">
+                                      <span className="text-caption font-bold text-status-error uppercase">
+                                        Prohibited Generator Directive:
+                                      </span>
+                                      <p className="text-small text-secondary font-mono leading-relaxed">
+                                        {instruction}
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </Card>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 3: Change History & Ledger */}
       {activeTab === "ledger" && (
         <div className="space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
