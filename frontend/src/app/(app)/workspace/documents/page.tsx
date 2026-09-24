@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState } from "@/components/common/state-views";
+import { EmptyState, ToastBanner } from "@/components/common/state-views";
 import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
 import {
@@ -124,6 +124,12 @@ export default function DocumentsPage() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentData | null>(null);
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // Ingestion upload states
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -203,8 +209,10 @@ export default function DocumentsPage() {
       setPhase("ReadyForReview");
       setIsUploadOpen(false);
       setUploadFile(null);
+      showToast("Document uploaded successfully", "success");
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to ingest document.");
+      showToast(err.message || "Failed to upload document. Please try again.", "error");
       setPhase("Failed");
     }
   };
@@ -240,14 +248,21 @@ export default function DocumentsPage() {
 
       setPhase("SuccessfullyImported");
       setStatusMessage("Career evidence successfully imported into master workspace!");
+      showToast("Career evidence imported to master workspace", "success");
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to confirm ingestion import.");
+      showToast(err.message || "Failed to confirm ingestion import.", "error");
       setPhase("ReadyForReview");
     }
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Original Documents & Transcripts</h2>
@@ -1016,8 +1031,14 @@ export default function DocumentsPage() {
         onClose={() => setItemToDelete(null)}
         onConfirm={async () => {
           if (!itemToDelete) return;
-          await deleteDocument(itemToDelete.id);
-          setItemToDelete(null);
+          try {
+            await deleteDocument(itemToDelete.id);
+            showToast("Document deleted successfully", "success");
+          } catch (err: any) {
+            showToast("Failed to delete document. Please try again.", "error");
+          } finally {
+            setItemToDelete(null);
+          }
         }}
         title="Delete Document"
         description="Are you sure you want to delete this document from your workspace? Extracted workspace records will not be removed."

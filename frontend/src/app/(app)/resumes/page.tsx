@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState, ErrorAlert } from "@/components/common/state-views";
+import { EmptyState, ErrorAlert, ToastBanner } from "@/components/common/state-views";
 import { formatDate } from "@/lib/utils";
 import {
   FileText,
@@ -40,6 +40,12 @@ export default function ResumesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [renameItem, setRenameItem] = useState<ResumeItem | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // Create Targeted Variant Modal State
   const [isCreateVariantOpen, setIsCreateVariantOpen] = useState(false);
@@ -70,10 +76,34 @@ export default function ResumesPage() {
     setRenameTitle(r.title);
   };
 
-  const handleSaveRename = () => {
+  const handleSaveRename = async () => {
     if (renameItem && renameTitle.trim()) {
-      updateResume(renameItem.id, { title: renameTitle.trim() });
-      setRenameItem(null);
+      try {
+        await updateResume(renameItem.id, { title: renameTitle.trim() });
+        showToast("Resume renamed successfully", "success");
+      } catch (err: any) {
+        showToast("Failed to rename resume. Please try again.", "error");
+      } finally {
+        setRenameItem(null);
+      }
+    }
+  };
+
+  const handleDuplicateResume = async (id: string) => {
+    try {
+      await duplicateResume(id);
+      showToast("Resume duplicated successfully", "success");
+    } catch (err: any) {
+      showToast("Failed to duplicate resume. Please try again.", "error");
+    }
+  };
+
+  const handleDeleteResume = async (id: string) => {
+    try {
+      await deleteResume(id);
+      showToast("Resume deleted successfully", "success");
+    } catch (err: any) {
+      showToast("Failed to delete resume. Please try again.", "error");
     }
   };
 
@@ -175,6 +205,11 @@ export default function ResumesPage() {
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -371,14 +406,14 @@ export default function ResumesPage() {
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => duplicateResume(res.id)}
+                      onClick={() => handleDuplicateResume(res.id)}
                       title="Duplicate"
                       className="p-1.5 rounded text-secondary hover:bg-page hover:text-primary"
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </button>
                     <button
-                      onClick={() => deleteResume(res.id)}
+                      onClick={() => handleDeleteResume(res.id)}
                       title="Delete"
                       className="p-1.5 rounded text-status-error hover:bg-status-error-soft"
                     >
@@ -465,14 +500,14 @@ export default function ResumesPage() {
                   )}
 
                   <button
-                    onClick={() => duplicateResume(res.id)}
+                    onClick={() => handleDuplicateResume(res.id)}
                     className="p-1.5 rounded text-secondary hover:bg-page hover:text-primary"
                     title="Duplicate"
                   >
                     <Copy className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => deleteResume(res.id)}
+                    onClick={() => handleDeleteResume(res.id)}
                     className="p-1.5 rounded text-status-error hover:bg-status-error-soft"
                     title="Delete"
                   >

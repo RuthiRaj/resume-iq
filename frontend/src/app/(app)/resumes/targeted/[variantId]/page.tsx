@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
-import { LoadingState, EmptyState, ErrorAlert } from "@/components/common/state-views";
+import { LoadingState, EmptyState, ErrorAlert, ToastBanner } from "@/components/common/state-views";
 import { formatDate } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -81,7 +81,7 @@ export default function TargetedResumeWorkspacePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   // Manual Edit Modal State
   const [isManualEditModalOpen, setIsManualEditModalOpen] = useState(false);
@@ -132,9 +132,9 @@ export default function TargetedResumeWorkspacePage() {
   const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
   };
 
   // Fetch variant from backend
@@ -300,7 +300,7 @@ export default function TargetedResumeWorkspacePage() {
       }
 
       setIsManualEditModalOpen(false);
-      showToast(`Manual edit saved! Version updated to v${data.newVersion}.`);
+      showToast(`Manual edit saved! Version updated to v${data.newVersion}.`, "success");
       await fetchVariant(true);
       await fetchFitComparison();
     } catch (err: any) {
@@ -416,7 +416,7 @@ export default function TargetedResumeWorkspacePage() {
 
       setIsAiEditModalOpen(false);
       setAiProposal(null);
-      showToast(`AI proposal accepted and applied! Variant is now at v${data.newVersion}.`);
+      showToast(`AI proposal accepted and applied! Variant is now at v${data.newVersion}.`, "success");
       await fetchVariant(true);
       await fetchFitComparison();
     } catch (err: any) {
@@ -512,7 +512,7 @@ export default function TargetedResumeWorkspacePage() {
       setIsApplyModalOpen(false);
       setApplyApprovedBullet("");
       setApplyRequirementName("");
-      showToast(`Change applied! Variant incremented to v${data.newVersion}.`);
+      showToast(`Change applied! Variant incremented to v${data.newVersion}.`, "success");
       await fetchVariant(true);
       await fetchFitComparison();
     } catch (err: any) {
@@ -548,7 +548,7 @@ export default function TargetedResumeWorkspacePage() {
       }
 
       setRevertingChange(null);
-      showToast(`Change reverted. Variant incremented to v${data.newVersion}.`);
+      showToast(`Change reverted. Variant incremented to v${data.newVersion}.`, "success");
       await fetchVariant(true);
       await fetchFitComparison();
     } catch (err: any) {
@@ -584,8 +584,10 @@ export default function TargetedResumeWorkspacePage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
+      showToast("PDF exported successfully", "success");
     } catch (err: any) {
       console.error("PDF download error:", err);
+      showToast("Failed to download PDF. Please try again.", "error");
     } finally {
       setIsPdfDownloading(false);
     }
@@ -595,6 +597,7 @@ export default function TargetedResumeWorkspacePage() {
     if (exportData?.content) {
       navigator.clipboard.writeText(exportData.content);
       setExportCopied(true);
+      showToast("Export copied to clipboard", "info");
       setTimeout(() => setExportCopied(false), 2000);
     }
   };
@@ -612,6 +615,13 @@ export default function TargetedResumeWorkspacePage() {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    if (exportFormat === "markdown") {
+      showToast("Markdown exported successfully", "success");
+    } else if (exportFormat === "plain_text") {
+      showToast("Text export downloaded", "success");
+    } else {
+      showToast("JSON exported successfully", "success");
+    }
   };
 
   if (isLoading) {
@@ -657,10 +667,9 @@ export default function TargetedResumeWorkspacePage() {
   return (
     <div className="space-y-6 pb-12">
       {/* Toast Notification Banner */}
-      {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 flex items-center gap-2 rounded-card bg-primary text-primary-foreground px-4 py-3 shadow-lg animate-in fade-in slide-in-from-top-2">
-          <CheckCircle2 className="h-5 w-5 text-status-success" />
-          <span className="text-small font-medium">{toastMessage}</span>
+      {toast && (
+        <div className="fixed top-5 right-5 z-50 animate-in fade-in slide-in-from-top-2">
+          <ToastBanner message={toast.message} type={toast.type} className="shadow-lg" />
         </div>
       )}
 
@@ -1601,6 +1610,7 @@ export default function TargetedResumeWorkspacePage() {
                     onClick={() => {
                       setAiProposal(null);
                       setIsAiEditModalOpen(false);
+                      showToast("AI changes rejected", "info");
                     }}
                     disabled={isApplyingProposal}
                   >

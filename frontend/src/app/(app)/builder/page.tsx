@@ -10,16 +10,14 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
-import { ErrorAlert } from "@/components/common/state-views";
+import { ErrorAlert, LoadingState, ToastBanner } from "@/components/common/state-views";
 import { ResumeUniversalRenderer } from "@/components/resume-templates/resume-renderer";
-import { LoadingState } from "@/components/common/state-views";
 import {
   Sparkles,
   Printer,
   Download,
   RotateCcw,
   Save,
-  CheckCircle2,
   Sliders,
   Layers,
   FileText,
@@ -80,7 +78,12 @@ function BuilderContent() {
 
   // AI regeneration status
   const [isRegeneratingSection, setIsRegeneratingSection] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // AI Role Generate Modal State
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
@@ -129,6 +132,7 @@ function BuilderContent() {
 
     setCustomSummary(factualSummary);
     setIsRegeneratingSection(null);
+    showToast("Summary refined successfully", "success");
   };
 
   const handleSaveResume = async () => {
@@ -145,47 +149,49 @@ function BuilderContent() {
       customSummary: customSummary,
     };
 
-    if (existingResume) {
-      await updateResume(existingResume.id, {
-        title: resumeTitle,
-        targetRole,
-        targetCompany,
-        template: activeTemplate,
-        sections: {
-          summary: customSummary,
-          experiences: selectedExpIds,
-          projects: selectedProjIds,
-          education: education.map((e) => e.id || ""),
-          skills: skills.map((s) => s.id || ""),
-          certifications: certifications.map((c) => c.id || ""),
-        },
-        snapshot: currentSnapshot,
-      });
-    } else {
-      await addResume({
-        title: resumeTitle,
-        targetRole,
-        targetCompany,
-        template: activeTemplate,
-        lastEdited: new Date().toISOString().split("T")[0],
-        score: 0,
-        atsScore: 0,
-        scoreBreakdown: { relevance: 0, keywords: 0, metrics: 0, formatting: 0 },
-        tags: ["Draft", targetCompany || "General"],
-        sections: {
-          summary: customSummary,
-          experiences: selectedExpIds,
-          projects: selectedProjIds,
-          education: education.map((e) => e.id || ""),
-          skills: skills.map((s) => s.id || ""),
-          certifications: certifications.map((c) => c.id || ""),
-        },
-        snapshot: currentSnapshot,
-      });
+    try {
+      if (existingResume) {
+        await updateResume(existingResume.id, {
+          title: resumeTitle,
+          targetRole,
+          targetCompany,
+          template: activeTemplate,
+          sections: {
+            summary: customSummary,
+            experiences: selectedExpIds,
+            projects: selectedProjIds,
+            education: education.map((e) => e.id || ""),
+            skills: skills.map((s) => s.id || ""),
+            certifications: certifications.map((c) => c.id || ""),
+          },
+          snapshot: currentSnapshot,
+        });
+      } else {
+        await addResume({
+          title: resumeTitle,
+          targetRole,
+          targetCompany,
+          template: activeTemplate,
+          lastEdited: new Date().toISOString().split("T")[0],
+          score: 0,
+          atsScore: 0,
+          scoreBreakdown: { relevance: 0, keywords: 0, metrics: 0, formatting: 0 },
+          tags: ["Draft", targetCompany || "General"],
+          sections: {
+            summary: customSummary,
+            experiences: selectedExpIds,
+            projects: selectedProjIds,
+            education: education.map((e) => e.id || ""),
+            skills: skills.map((s) => s.id || ""),
+            certifications: certifications.map((c) => c.id || ""),
+          },
+          snapshot: currentSnapshot,
+        });
+      }
+      showToast("Resume saved successfully", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to save resume. Please try again.", "error");
     }
-
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
   const handleGenerateResume = async () => {
@@ -322,11 +328,8 @@ function BuilderContent() {
         </div>
       </div>
 
-      {saveSuccess && (
-        <div className="flex items-center gap-2 rounded-btn border border-status-success/30 bg-status-success-soft p-3 text-status-success text-small font-medium animate-in fade-in">
-          <CheckCircle2 className="h-4 w-4" />
-          <span>Resume saved to your library!</span>
-        </div>
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
       )}
 
       {/* Main Split Layout: Editor Sidebar (Left) & Live Preview (Right) */}

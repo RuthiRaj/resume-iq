@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertCircle, FileQuestion, Loader2 } from "lucide-react";
+import { AlertCircle, FileQuestion, Loader2, CheckCircle2, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -94,6 +94,43 @@ export function ErrorAlert({
           Try Again
         </Button>
       )}
+    </div>
+  );
+}
+
+export function ToastBanner({
+  message,
+  type = "success",
+  className,
+}: {
+  message: string;
+  type?: "success" | "error" | "info";
+  className?: string;
+}) {
+  const isError = type === "error";
+  const isInfo = type === "info";
+  return (
+    <div
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
+      className={cn(
+        "flex items-center gap-2 rounded-btn px-4 py-2.5 text-small font-medium border animate-in fade-in duration-200",
+        isError
+          ? "bg-status-error-soft text-status-error border-status-error/20"
+          : isInfo
+          ? "bg-accent-soft text-accent border-accent/20"
+          : "bg-status-success-soft text-status-success border-status-success/20",
+        className
+      )}
+    >
+      {isError ? (
+        <AlertCircle className="h-4 w-4 shrink-0" />
+      ) : isInfo ? (
+        <Info className="h-4 w-4 shrink-0" />
+      ) : (
+        <CheckCircle2 className="h-4 w-4 shrink-0" />
+      )}
+      <span>{message}</span>
     </div>
   );
 }

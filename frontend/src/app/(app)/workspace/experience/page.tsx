@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState } from "@/components/common/state-views";
+import { EmptyState, ToastBanner } from "@/components/common/state-views";
 import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
 import {
@@ -23,7 +23,6 @@ import {
   Sparkles,
   X,
   Loader2,
-  CheckCircle2,
   AlertCircle,
 } from "lucide-react";
 
@@ -41,13 +40,13 @@ export default function ExperiencePage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
   };
 
   const {
@@ -146,14 +145,15 @@ export default function ExperiencePage() {
     try {
       if (editingId) {
         await updateExperience(editingId, submission);
-        showToast("Position updated successfully.");
+        showToast("Experience updated successfully", "success");
       } else {
         await addExperience(submission);
-        showToast("Position added successfully.");
+        showToast("Experience added successfully", "success");
       }
       setIsModalOpen(false);
     } catch (err: any) {
-      setSubmitError(err.message || "Failed to save position. Please try again.");
+      setSubmitError(err.message || "Failed to save experience. Please try again.");
+      showToast("Failed to save experience. Please try again.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -161,19 +161,21 @@ export default function ExperiencePage() {
 
   const handleDeleteConfirm = async () => {
     if (!itemToDelete) return;
-    await deleteExperience(itemToDelete.id);
-    showToast("Position deleted from workspace.");
-    setItemToDelete(null);
+    try {
+      await deleteExperience(itemToDelete.id);
+      showToast("Experience deleted successfully", "success");
+    } catch (err: any) {
+      showToast("Failed to delete experience. Please try again.", "error");
+    } finally {
+      setItemToDelete(null);
+    }
   };
 
   return (
     <div className="space-y-6">
       {/* Toast Notification Banner */}
-      {toastMessage && (
-        <div className="flex items-center gap-2 rounded-btn bg-status-success-soft px-4 py-2.5 text-status-success text-small font-medium border border-status-success/20 animate-in fade-in duration-200">
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{toastMessage}</span>
-        </div>
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
       )}
 
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
