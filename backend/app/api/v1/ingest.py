@@ -13,7 +13,9 @@ from app.schemas.ingestion import (
     IngestionConfirmRequest,
     IngestionConfirmResponse,
 )
+from app.schemas.evidence import EvidenceProvenanceDetail
 from app.services.ingestion_service import IngestionService
+from app.services.evidence_service import EvidenceService
 from app.services.document_extractor import validate_document_upload
 
 router = APIRouter(prefix="/resumes", tags=["Resumes Ingestion"])
@@ -90,4 +92,23 @@ async def confirm_ingestion_endpoint(
         user=current_user,
         ingestion_id=ingestion_id,
         reviewed_data=req.parsed_data,
+    )
+
+
+@router.get(
+    "/evidence/{evidence_id}/provenance",
+    response_model=EvidenceProvenanceDetail,
+    summary="Get provenance details for an evidence item",
+)
+async def get_evidence_provenance_endpoint(
+    evidence_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> EvidenceProvenanceDetail:
+    """
+    Resolves full provenance lineage for an evidence item back to its workspace source entity
+    and original uploaded document draft with tenant isolation.
+    """
+    return await EvidenceService.resolve_evidence_provenance(
+        user=current_user,
+        evidence_id=evidence_id,
     )

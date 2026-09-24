@@ -239,6 +239,9 @@ class IngestionService:
                     detail=f"Failed to save {col_name} entity to master workspace (status {res.status_code}).",
                 )
 
+        doc_src_id = clean_id
+        doc_src_name = draft.document_name or ""
+
         # 1. Hydrate Profile
         if reviewed_data.profile:
             await ProfileService.save_profile(user, reviewed_data.profile)
@@ -266,6 +269,8 @@ class IngestionService:
                 "isCurrent": (exp.end_date or "").strip().lower() in ("present", "current"),
                 "bullets": exp.bullets or [],
                 "technologies": exp.technologies or [],
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("experience", matched_id, payload)
             summary["experience"] += 1
@@ -287,6 +292,8 @@ class IngestionService:
                 "degree": edu.degree or "",
                 "institution": edu.institution or "",
                 "fieldOfStudy": edu.field_of_study or "",
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("education", matched_id, payload)
             summary["education"] += 1
@@ -308,6 +315,8 @@ class IngestionService:
                 "name": sk.name,
                 "category": sk.category or "Technical",
                 "proficiency": sk.proficiency or "Intermediate",
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("skills", matched_id, payload)
             summary["skills"] += 1
@@ -331,6 +340,8 @@ class IngestionService:
                 "description": proj.description or "",
                 "highlights": proj.highlights or [],
                 "techStack": proj.tech_stack or [],
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("projects", matched_id, payload)
             summary["projects"] += 1
@@ -351,6 +362,8 @@ class IngestionService:
             payload = {
                 "title": cert.title,
                 "issuer": cert.issuer or "",
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("certifications", matched_id, payload)
             summary["certifications"] += 1

@@ -101,6 +101,12 @@ CANONICAL_SKILL_MAP: Dict[str, str] = {
     "observability": "Observability",
     "high availability": "High Availability",
     "api design": "API Design",
+    "machine learning": "Machine Learning",
+    "ml": "Machine Learning",
+    "deep learning": "Deep Learning",
+    "dl": "Deep Learning",
+    "nlp": "NLP",
+    "computer vision": "Computer Vision",
 
     # Soft Skills & Collaboration
     "communication": "Communication",
@@ -175,6 +181,10 @@ CANONICAL_SKILL_CATEGORY: Dict[str, str] = {
     "Observability": "Domain",
     "High Availability": "Domain",
     "API Design": "Domain",
+    "Machine Learning": "Domain",
+    "Deep Learning": "Domain",
+    "NLP": "Domain",
+    "Computer Vision": "Domain",
 
     # Soft Skills
     "Communication": "SoftSkill",
