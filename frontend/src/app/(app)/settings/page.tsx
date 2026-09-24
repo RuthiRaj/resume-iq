@@ -9,13 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { CareerSignalMeter } from "@/components/common/career-signal-meter";
+import { ToastBanner } from "@/components/common/state-views";
 import {
   User,
   ShieldCheck,
   Download,
   RotateCcw,
   Sparkles,
-  CheckCircle2,
   Lock,
   LogOut,
   Loader2,
@@ -38,7 +38,12 @@ export default function SettingsPage() {
   } = useCareer();
 
   const [isSeeding, setIsSeeding] = useState(false);
-  const [seedSuccess, setSeedSuccess] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const handleExportData = () => {
     const backup = {
@@ -60,14 +65,16 @@ export default function SettingsPage() {
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
+    showToast("Career data backup downloaded", "success");
   };
 
   const handleSeedData = async () => {
     setIsSeeding(true);
     try {
       await seedSampleData();
-      setSeedSuccess(true);
-      setTimeout(() => setSeedSuccess(false), 4000);
+      showToast("Sample data imported successfully", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to import sample data.", "error");
     } finally {
       setIsSeeding(false);
     }
@@ -80,6 +87,11 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-4xl">
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-h1 font-semibold text-primary">Account & Workspace Settings</h1>
@@ -93,13 +105,6 @@ export default function SettingsPage() {
           <span>Sign Out</span>
         </Button>
       </div>
-
-      {seedSuccess && (
-        <div className="flex items-center gap-2 rounded-btn border border-status-success/30 bg-status-success-soft p-3 text-status-success text-small font-medium animate-in fade-in">
-          <CheckCircle2 className="h-4 w-4" />
-          <span>Sample career data successfully written to your Firebase Firestore collections!</span>
-        </div>
-      )}
 
       {/* Career Signal Health in Settings */}
       <Card>

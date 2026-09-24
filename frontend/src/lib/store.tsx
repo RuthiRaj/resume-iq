@@ -15,7 +15,7 @@ import {
   orderBy,
   serverTimestamp,
 } from "firebase/firestore";
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref, deleteObject } from "firebase/storage";
 import {
   ProfileData,
   EducationData,
@@ -226,6 +226,126 @@ export interface CandidateEvidenceData {
   }>;
 }
 
+export interface SectionPlanData {
+  sectionName: string;
+  section_name?: string;
+  included: boolean;
+  selectedEvidenceIds?: string[];
+  selected_evidence_ids?: string[];
+  priority: number;
+  order: number;
+  rationale: string;
+}
+
+export interface SelectedEvidenceData {
+  evidenceId: string;
+  evidence_id?: string;
+  sourceType: string;
+  source_type?: string;
+  sourceItemId: string;
+  source_item_id?: string;
+  title: string;
+  rankScore: number;
+  rank_score?: number;
+  selectionReason: string;
+  selection_reason?: string;
+  matchedSkills?: string[];
+  matched_skills?: string[];
+}
+
+export interface ExcludedEvidenceData {
+  evidenceId: string;
+  evidence_id?: string;
+  sourceType: string;
+  source_type?: string;
+  sourceItemId: string;
+  source_item_id?: string;
+  title: string;
+  rankScore: number;
+  rank_score?: number;
+  exclusionReason: string;
+  exclusion_reason?: string;
+}
+
+export interface PrioritizedSkillData {
+  name: string;
+  category: string;
+  importance: "MustHave" | "Preferred" | "Unspecified";
+  matchClass?: string;
+  match_class?: string;
+  isDirectlyDemonstrated: boolean;
+  is_directly_demonstrated?: boolean;
+  evidenceIds?: string[];
+  evidence_ids?: string[];
+}
+
+export interface HardGapData {
+  requirementName: string;
+  requirement_name?: string;
+  category: string;
+  gapType: string;
+  gap_type?: string;
+  reason: string;
+  prohibitedClaimInstruction: string;
+  prohibited_claim_instruction?: string;
+}
+
+export interface RequirementStrategyData {
+  focusAreas?: string[];
+  focus_areas?: string[];
+  summaryTheme?: string;
+  summary_theme?: string;
+  highlightedDomains?: string[];
+  highlighted_domains?: string[];
+  notes?: string[];
+}
+
+export interface ResumePlanData {
+  planId: string;
+  plan_id?: string;
+  userId?: string;
+  user_id?: string;
+  targetRole: string;
+  target_role?: string;
+  targetCompany?: string;
+  target_company?: string;
+  targetPageBudget: number;
+  target_page_budget?: number;
+  sectionOrder?: string[];
+  section_order?: string[];
+  sections?: SectionPlanData[];
+  selectedEvidence?: SelectedEvidenceData[];
+  selected_evidence?: SelectedEvidenceData[];
+  excludedEvidence?: ExcludedEvidenceData[];
+  excluded_evidence?: ExcludedEvidenceData[];
+  prioritizedSkills?: PrioritizedSkillData[];
+  prioritized_skills?: PrioritizedSkillData[];
+  prioritizedKeywords?: string[];
+  prioritized_keywords?: string[];
+  requirementStrategy?: RequirementStrategyData;
+  requirement_strategy?: RequirementStrategyData;
+  hardGaps?: HardGapData[];
+  hard_gaps?: HardGapData[];
+  relatedButUnverifiedRequirements?: string[];
+  related_but_unverified_requirements?: string[];
+  userConfirmationRequired?: string[];
+  user_confirmation_required?: string[];
+  planningMetadata?: Record<string, any>;
+  planning_metadata?: Record<string, any>;
+  createdAt?: string;
+  created_at?: string;
+}
+
+export interface GenerationMetadataData {
+  provider?: string;
+  model?: string;
+  generatedAt?: string;
+  generated_at?: string;
+  failover_log?: any[];
+  plan?: ResumePlanData;
+  [key: string]: any;
+}
+
 export interface TargetedResumeVariant {
   variantId: string;
   variant_id?: string;
@@ -260,12 +380,48 @@ export interface TargetedResumeVariant {
   snapshot: CandidateEvidenceData;
   changeLedger?: ChangeRecordData[];
   change_ledger?: ChangeRecordData[];
+  provider?: string;
+  model?: string;
+  generationMetadata?: GenerationMetadataData;
+  generation_metadata?: GenerationMetadataData;
   createdAt?: string;
   created_at?: string;
   updatedAt?: string;
   updated_at?: string;
 }
 
+export interface EvidenceProvenanceDetailData {
+  evidenceId: string;
+  evidence_id?: string;
+  userId: string;
+  user_id?: string;
+  sourceType: string;
+  source_type?: string;
+  sourceItemId: string;
+  source_item_id?: string;
+  title: string;
+  sourceDocumentId?: string | null;
+  source_document_id?: string | null;
+  sourceDocumentName?: string | null;
+  source_document_name?: string | null;
+  ingestionDraftStatus?: string | null;
+  ingestion_draft_status?: string | null;
+  fileUrl?: string | null;
+  file_url?: string | null;
+  verificationStatus: "verified" | "unverified" | "user_confirmed" | "missing" | "related_unverified" | string;
+  verification_status?: string;
+  confidence: number;
+}
+
+export type SectionPlan = SectionPlanData;
+export type SelectedEvidenceItem = SelectedEvidenceData;
+export type ExcludedEvidenceItem = ExcludedEvidenceData;
+export type PrioritizedSkill = PrioritizedSkillData;
+export type HardGap = HardGapData;
+export type RequirementStrategy = RequirementStrategyData;
+export type ResumePlan = ResumePlanData;
+export type GenerationMetadata = GenerationMetadataData;
+export type EvidenceProvenanceDetail = EvidenceProvenanceDetailData;
 export type ChangeRecord = ChangeRecordData;
 export type RequirementProgression = RequirementProgressionData;
 export type FitComparisonResponse = FitComparisonData;
@@ -387,7 +543,7 @@ interface CareerContextType {
   deleteAchievement: (id: string) => Promise<void>;
 
   documents: DocumentData[];
-  addDocument: (data: Omit<DocumentData, "id">, file?: File) => Promise<void>;
+  addDocument: (data: Omit<DocumentData, "id">, fileUrl?: string) => Promise<void>;
   deleteDocument: (id: string, storagePath?: string) => Promise<void>;
 
   resumes: ResumeItem[];
@@ -773,49 +929,22 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addDocument = useCallback(
-    async (data: Omit<DocumentData, "id">, file?: File) => {
+    async (data: Omit<DocumentData, "id">, fileUrl?: string) => {
       const currentUser = userRef.current;
       if (!currentUser?.uid) return;
-      let fileUrl = "";
-      let storagePath = "";
 
-      if (file) {
-        // Enforce maximum file size (15MB)
-        const MAX_FILE_SIZE = 15 * 1024 * 1024;
-        if (file.size > MAX_FILE_SIZE) {
-          throw new Error("File exceeds maximum allowed size of 15MB.");
-        }
-
-        // Enforce allowed document formats and reject dangerous scripts/executables
-        const lowerName = file.name.toLowerCase();
-        const allowedExtensions = [".pdf", ".docx", ".doc", ".txt"];
-        const isAllowed = allowedExtensions.some((ext) => lowerName.endsWith(ext));
-        if (!isAllowed) {
-          throw new Error("Invalid file type. Supported document formats: PDF, DOCX, DOC, TXT.");
-        }
-
-        const prohibitedExtensions = [".exe", ".sh", ".bat", ".cmd", ".js", ".html", ".htm", ".svg", ".php", ".vbs", ".py"];
-        if (prohibitedExtensions.some((ext) => lowerName.endsWith(ext))) {
-          throw new Error("Executable or script files are strictly prohibited.");
-        }
-
-        const cleanBaseName = file.name.replace(/^.*[\\\/]/, "").replace(/[^a-zA-Z0-9.-]/g, "_");
-        const sanitizedName = `${Date.now()}_${cleanBaseName}`;
-        storagePath = `users/${currentUser.uid}/documents/${sanitizedName}`;
-        const fileRef = ref(storage, storagePath);
-        await uploadBytesResumable(fileRef, file);
-        try {
-          fileUrl = await getDownloadURL(fileRef);
-        } catch {
-          // Storage URL placeholder if storage is still initializing
-          fileUrl = "";
-        }
-      }
-
+      // NOTE: the original file is uploaded server-side during ingestion
+      // (backend -> Cloudinary, see app/services/cloud_storage_service.py),
+      // not from the browser. This avoids browser-to-storage CORS entirely
+      // and doesn't require the Firebase Storage Blaze plan. `fileUrl`, if
+      // provided, is the URL the backend already returned; storagePath is
+      // left empty since Firebase Storage is no longer used for new uploads
+      // (deleteDocument below still supports it for any pre-existing docs
+      // that have a storagePath from before this change).
       await addDoc(collection(db, "users", currentUser.uid, "documents"), {
         ...data,
-        fileUrl,
-        storagePath,
+        fileUrl: fileUrl || "",
+        storagePath: "",
         createdAt: new Date().toISOString(),
       });
     },

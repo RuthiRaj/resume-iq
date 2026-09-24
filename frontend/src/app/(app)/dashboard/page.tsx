@@ -47,6 +47,7 @@ export default function DashboardPage() {
     projects,
     experience,
     certifications,
+    documents,
     resumes,
     actions,
     dismissAction,
@@ -158,16 +159,23 @@ export default function DashboardPage() {
       signalCompleteness: Math.max(0, overall > 18 ? overall - 18 : 0),
     },
     {
-      month: "Last month",
-      atsScore: Math.max(0, currentAts > 0 ? currentAts - 4 : 0),
-      signalCompleteness: Math.max(0, overall > 8 ? overall - 8 : 0),
-    },
-    {
       month: "Current",
       atsScore: currentAts,
       signalCompleteness: overall,
     },
   ];
+
+  // Dynamic 3-step Onboarding Status for First-Time Users
+  const hasDocuments = (documents && documents.length > 0) || (resumes && resumes.length > 0);
+  const hasCareerEvidence = (experience && experience.length > 0) || (skills && skills.length > 0) || (profile.summary && profile.summary.length > 20);
+  const hasRunAtsAudit = scoredResumes.length > 0;
+
+  const step1Complete = hasDocuments;
+  const step2Complete = hasCareerEvidence;
+  const step3Complete = hasRunAtsAudit;
+
+  const completedStepCount = (step1Complete ? 1 : 0) + (step2Complete ? 1 : 0) + (step3Complete ? 1 : 0);
+  const isOnboardingComplete = completedStepCount === 3;
 
   return (
     <div className="space-y-6">
@@ -197,6 +205,104 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Onboarding Card for New Candidates */}
+      {!isOnboardingComplete && (
+        <Card className="border-accent/30 bg-gradient-to-r from-accent/5 via-page to-surface shadow-subtle">
+          <CardHeader className="pb-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-accent" />
+                <CardTitle className="text-h3 font-bold text-primary">Get Started with ResumeIQ</CardTitle>
+              </div>
+              <Badge variant="outline" className="bg-accent/10 border-accent/30 text-accent font-medium self-start sm:self-auto">
+                Step {completedStepCount} of 3 ({Math.round((completedStepCount / 3) * 100)}% Complete)
+              </Badge>
+            </div>
+            <CardDescription className="text-secondary">
+              Follow this 3-step setup to extract candidate evidence, hydrate your master workspace, and run targeted ATS audits.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Step 1 */}
+              <div className={`p-4 rounded-card border transition-all ${step1Complete ? "border-status-success/40 bg-status-success-soft/30" : "border-border bg-page"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-caption font-semibold uppercase tracking-wider text-muted">Step 1</span>
+                  {step1Complete ? (
+                    <Badge variant="success" className="gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>Completed</span>
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Incomplete</Badge>
+                  )}
+                </div>
+                <h4 className="font-semibold text-primary text-body mb-1">Upload Existing Resume</h4>
+                <p className="text-caption text-secondary mb-3">
+                  Upload your raw PDF or DOCX file for server-side AI text extraction.
+                </p>
+                <Link href="/workspace/documents">
+                  <Button variant={step1Complete ? "outline" : "primary"} size="sm" className="w-full gap-1">
+                    <span>{step1Complete ? "View Documents" : "Upload Document"}</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              </div>
+
+              {/* Step 2 */}
+              <div className={`p-4 rounded-card border transition-all ${step2Complete ? "border-status-success/40 bg-status-success-soft/30" : "border-border bg-page"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-caption font-semibold uppercase tracking-wider text-muted">Step 2</span>
+                  {step2Complete ? (
+                    <Badge variant="success" className="gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>Completed</span>
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Incomplete</Badge>
+                  )}
+                </div>
+                <h4 className="font-semibold text-primary text-body mb-1">Review & Confirm Evidence</h4>
+                <p className="text-caption text-secondary mb-3">
+                  Verify work history, skills, and projects in your Master Workspace.
+                </p>
+                <Link href="/workspace/experience">
+                  <Button variant={step2Complete ? "outline" : "primary"} size="sm" className="w-full gap-1">
+                    <span>{step2Complete ? "Review Workspace" : "Review Evidence"}</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              </div>
+
+              {/* Step 3 */}
+              <div className={`p-4 rounded-card border transition-all ${step3Complete ? "border-status-success/40 bg-status-success-soft/30" : "border-border bg-page"}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-caption font-semibold uppercase tracking-wider text-muted">Step 3</span>
+                  {step3Complete ? (
+                    <Badge variant="success" className="gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>Completed</span>
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Incomplete</Badge>
+                  )}
+                </div>
+                <h4 className="font-semibold text-primary text-body mb-1">Run First ATS Audit</h4>
+                <p className="text-caption text-secondary mb-3">
+                  Audit your resume against a target job description for gap remediation.
+                </p>
+                <Link href="/analyzer">
+                  <Button variant={step3Complete ? "outline" : "primary"} size="sm" className="w-full gap-1">
+                    <span>{step3Complete ? "Run New Audit" : "Run ATS Audit"}</span>
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Signature Career Signal Meter Card */}
       <Card className="border-accent/20 bg-surface">

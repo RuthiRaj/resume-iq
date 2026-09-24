@@ -10,15 +10,17 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState } from "@/components/common/state-views";
+import { EmptyState, ToastBanner } from "@/components/common/state-views";
+import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import {
   Layers,
   Plus,
   Pencil,
   Trash2,
   Search,
-  CheckCircle2,
   Sparkles,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 
 const CATEGORIES = [
@@ -29,12 +31,25 @@ const CATEGORIES = [
   "Methodologies & Soft Skills",
 ] as const;
 
+const PROFICIENCIES = ["Beginner", "Intermediate", "Advanced", "Expert"] as const;
+
 export default function SkillsPage() {
-  const { skills, addSkill, updateSkill, deleteSkill } = useCareer();
+  const { skills, addSkill, updateSkill, deleteSkill, isLoaded } = useCareer();
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const {
     register,
@@ -47,6 +62,7 @@ export default function SkillsPage() {
 
   const handleOpenAdd = (categoryDefault?: string) => {
     setEditingId(null);
+    setSubmitError(null);
     reset({
       name: "",
       category: (categoryDefault && categoryDefault !== "All"
@@ -60,17 +76,41 @@ export default function SkillsPage() {
 
   const handleOpenEdit = (skill: SkillData) => {
     setEditingId(skill.id || null);
+    setSubmitError(null);
     reset(skill);
     setIsModalOpen(true);
   };
 
-  const onSubmit = (data: SkillData) => {
-    if (editingId) {
-      updateSkill(editingId, data);
-    } else {
-      addSkill(data);
+  const onSubmit = async (data: SkillData) => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      if (editingId) {
+        await updateSkill(editingId, data);
+        showToast("Skill updated successfully", "success");
+      } else {
+        await addSkill(data);
+        showToast("Skill added successfully", "success");
+      }
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save skill. Please try again.");
+      showToast("Failed to save skill. Please try again.", "error");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsModalOpen(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    try {
+      await deleteSkill(itemToDelete.id);
+      showToast("Skill removed successfully", "success");
+    } catch (err: any) {
+      showToast("Failed to remove skill. Please try again.", "error");
+    } finally {
+      setItemToDelete(null);
+    }
   };
 
   const filteredSkills = skills.filter((s) => {
@@ -81,6 +121,11 @@ export default function SkillsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -138,7 +183,18 @@ export default function SkillsPage() {
       </div>
 
       {/* Skills Grid / Empty State */}
-      {filteredSkills.length === 0 ? (
+      {!isLoaded ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1, 2, 3, 4, 5, 6].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-4 space-y-2">
+                <div className="h-4 bg-border/60 rounded w-1/2" />
+                <div className="h-3 bg-border/40 rounded w-1/3" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : filteredSkills.length === 0 ? (
         <EmptyState
           title="No skills found"
           description="Add technical languages, frameworks, cloud tools, or soft skills to enhance ATS keyword matching."
@@ -149,68 +205,67 @@ export default function SkillsPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filteredSkills.map((skill) => (
-            <div
-              key={skill.id}
-              className="flex items-center justify-between rounded-card border border-border bg-surface p-3 hover:border-accent/30 transition-all group"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-body font-semibold text-primary">{skill.name}</span>
-                  <Badge
-                    variant={
-                      skill.proficiency === "Expert"
-                        ? "accent"
-                        : skill.proficiency === "Advanced"
-                        ? "success"
-                        : "default"
-                    }
-                  >
-                    {skill.proficiency}
-                  </Badge>
+            <Card key={skill.id} className="hover:border-accent/30 transition-all">
+              <CardContent className="p-4 flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-primary">{skill.name}</span>
+                    <Badge variant="outline" className="text-caption bg-page">
+                      {skill.proficiency}
+                    </Badge>
+                  </div>
+                  <p className="text-caption text-secondary">
+                    {skill.category}
+                    {skill.yearsOfExperience !== undefined && ` • ${skill.yearsOfExperience} yrs exp`}
+                  </p>
                 </div>
-                <div className="flex items-center gap-2 text-caption text-secondary">
-                  <span>{skill.category}</span>
-                  {skill.yearsOfExperience !== undefined && (
-                    <>
-                      <span>&bull;</span>
-                      <span>{skill.yearsOfExperience} yrs exp</span>
-                    </>
-                  )}
-                </div>
-              </div>
 
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => handleOpenEdit(skill)}
-                  className="rounded-[4px] p-1 text-secondary hover:bg-page hover:text-primary"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => skill.id && deleteSkill(skill.id)}
-                  className="rounded-[4px] p-1 text-status-error hover:bg-status-error-soft"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleOpenEdit(skill)}
+                    className="rounded-[4px] p-1.5 text-secondary hover:bg-page hover:text-primary"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() =>
+                      skill.id &&
+                      setItemToDelete({
+                        id: skill.id,
+                        name: skill.name,
+                      })
+                    }
+                    className="rounded-[4px] p-1.5 text-status-error hover:bg-status-error-soft"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
 
-      {/* Modal */}
+      {/* Add / Edit Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? "Edit Skill" : "Add Technical / Professional Skill"}
-        description="Provide skill name, category taxonomy, and proficiency level."
+        title={editingId ? "Edit Skill" : "Add Skill"}
+        description="Categorize your technical proficiency and industry experience."
         maxWidth="md"
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {submitError && (
+            <div className="flex items-center gap-2 rounded-btn bg-status-error-soft p-3 text-status-error text-small font-medium border border-status-error/20">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Skill Name</label>
+            <label className="text-small font-medium text-primary">Skill Name *</label>
             <Input
-              placeholder="e.g. TypeScript or Docker"
+              placeholder="e.g. TypeScript, React, Docker, Kubernetes"
               {...register("name")}
               className={errors.name ? "border-status-error" : ""}
             />
@@ -220,10 +275,10 @@ export default function SkillsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Category</label>
+            <label className="text-small font-medium text-primary">Category *</label>
             <select
               {...register("category")}
-              className="flex h-9 w-full rounded-input border border-border bg-surface px-3 py-1.5 text-body text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+              className="w-full rounded-input border border-border bg-surface px-3 py-2 text-body text-primary focus:outline-none focus:ring-1 focus:ring-accent"
             >
               {CATEGORIES.map((cat) => (
                 <option key={cat} value={cat}>
@@ -233,22 +288,23 @@ export default function SkillsPage() {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Proficiency</label>
+              <label className="text-small font-medium text-primary">Proficiency *</label>
               <select
                 {...register("proficiency")}
-                className="flex h-9 w-full rounded-input border border-border bg-surface px-3 py-1.5 text-body text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                className="w-full rounded-input border border-border bg-surface px-3 py-2 text-body text-primary focus:outline-none focus:ring-1 focus:ring-accent"
               >
-                <option value="Beginner">Beginner</option>
-                <option value="Intermediate">Intermediate</option>
-                <option value="Advanced">Advanced</option>
-                <option value="Expert">Expert</option>
+                {PROFICIENCIES.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Years of Exp</label>
+              <label className="text-small font-medium text-primary">Years Experience</label>
               <Input
                 type="number"
                 min={0}
@@ -259,15 +315,32 @@ export default function SkillsPage() {
           </div>
 
           <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
+            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              {editingId ? "Save Skill" : "Add Skill"}
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>{editingId ? "Save Changes" : "Add Skill"}</span>
+              )}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(itemToDelete)}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Skill"
+        description="Are you sure you want to delete this skill from your Master Career Workspace? Existing targeted resume variants will not be affected."
+        itemName={itemToDelete?.name}
+      />
     </div>
   );
 }

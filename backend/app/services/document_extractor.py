@@ -39,7 +39,7 @@ def validate_document_upload(filename: str, content_length: int) -> str:
 
     if content_length > MAX_DOCUMENT_SIZE_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"File exceeds maximum allowed size of {MAX_DOCUMENT_SIZE_BYTES // (1024 * 1024)}MB.",
         )
 
@@ -85,7 +85,7 @@ def extract_text_from_pdf(content: bytes) -> str:
         extracted = "\n\n".join(text_parts).strip()
         if not extracted:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="No readable text could be extracted from the PDF. Scanned images without selectable text are not supported.",
             )
 
@@ -122,7 +122,7 @@ def extract_text_from_docx(content: bytes) -> str:
         extracted = "\n".join(text_parts).strip()
         if not extracted:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="No readable text found in the DOCX document.",
             )
 

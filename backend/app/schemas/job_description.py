@@ -1,13 +1,24 @@
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field, ConfigDict
 
+SeniorityLevel = Literal[
+    "Intern",
+    "Junior",
+    "Associate",
+    "Mid",
+    "Senior",
+    "Lead",
+    "Staff",
+    "Principal",
+    "Executive",
+    "Unspecified",
+]
+
 
 class JobInfo(BaseModel):
     role_title: str = Field(..., alias="roleTitle", min_length=1, max_length=150)
     company: Optional[str] = Field(default="", max_length=100)
-    seniority_level: Literal[
-        "Junior", "Mid", "Senior", "Lead", "Principal", "Executive", "Unspecified"
-    ] = Field(default="Unspecified", alias="seniorityLevel")
+    seniority_level: SeniorityLevel = Field(default="Unspecified", alias="seniorityLevel")
     employment_type: Optional[str] = Field(default="", alias="employmentType", max_length=50)
     domain: Optional[str] = Field(default="", max_length=100)
 
@@ -69,9 +80,26 @@ class StructuredJobDescription(BaseModel):
         alias="technicalStack",
         description="Distinct technologies and platforms extracted across the job description",
     )
+    tools: List[str] = Field(
+        default_factory=list,
+        description="Specific development, build, or operational tools extracted from JD",
+    )
     responsibilities: List[str] = Field(
         default_factory=list,
         description="Concise core responsibilities faithfully extracted from JD",
+    )
+    qualifications: List[str] = Field(
+        default_factory=list,
+        description="Explicit required or preferred qualifications extracted from JD",
+    )
+    domain_terminology: List[str] = Field(
+        default_factory=list,
+        alias="domainTerminology",
+        description="Key domain-specific terminology (e.g. Distributed Systems, Microservices, CI/CD)",
+    )
+    keywords: List[str] = Field(
+        default_factory=list,
+        description="Important ATS keywords extracted from the JD",
     )
     experience: Optional[ExperienceRequirement] = Field(default=None)
     education: Optional[EducationRequirement] = Field(default=None)

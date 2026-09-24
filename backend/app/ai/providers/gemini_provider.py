@@ -1,6 +1,7 @@
+import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from fastapi import HTTPException, status
 from google import genai
 from google.genai import types
@@ -249,6 +250,145 @@ class GeminiAnalyzerProvider:
     @property
     def name(self) -> str:
         return "gemini"
+
+    @property
+    def model_name(self) -> str:
+        return settings.AI_ANALYZER_MODEL if (settings.AI_ANALYZER_MODEL and settings.AI_ANALYZER_MODEL.startswith("gemini-")) else "gemini-2.5-flash"
+
+    async def ping(self, timeout: float = 5.0) -> Dict[str, Any]:
+        """Runs a 1-token health ping with timeout, returning status and latency without leaking keys."""
+        import asyncio
+        api_key = settings.GEMINI_API_KEY
+        if not api_key or api_key.strip() in ("", "your_server_side_gemini_api_key_here"):
+            return {
+                "name": self.name,
+                "ok": False,
+                "latency_ms": None,
+                "error": "GEMINI_API_KEY is not configured.",
+            }
+
+        model_name = settings.AI_ANALYZER_MODEL or "gemini-2.5-flash"
+        ai = genai.Client(api_key=api_key)
+        start = asyncio.get_event_loop().time()
+        try:
+            await asyncio.wait_for(
+                ai.aio.models.generate_content(
+                    model=model_name,
+                    contents="ping",
+                    config=types.GenerateContentConfig(
+                        max_output_tokens=1,
+                    ),
+                ),
+                timeout=timeout,
+            )
+            latency_ms = round((asyncio.get_event_loop().time() - start) * 1000, 1)
+            return {
+                "name": self.name,
+                "ok": True,
+                "latency_ms": latency_ms,
+                "error": None,
+            }
+        except asyncio.TimeoutError:
+            latency_ms = round((asyncio.get_event_loop().time() - start) * 1000, 1)
+            return {
+                "name": self.name,
+                "ok": False,
+                "latency_ms": latency_ms,
+                "error": f"Gemini ping timed out after {timeout}s",
+            }
+        except Exception as e:
+            latency_ms = round((asyncio.get_event_loop().time() - start) * 1000, 1)
+            return {
+                "name": self.name,
+                "ok": False,
+                "latency_ms": latency_ms,
+                "error": f"Gemini ping failed: {type(e).__name__}",
+            }
+
+    async def generate_json(
+        self,
+        system_instruction: str,
+        user_prompt: str,
+        schema_hint: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        api_key = settings.GEMINI_API_KEY
+        if not api_key or api_key.strip() in ("", "your_server_side_gemini_api_key_here"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="GEMINI_API_KEY is not configured on the backend server.",
+            )
+
+        model_name = settings.AI_ANALYZER_MODEL or "gemini-2.5-flash"
+        ai = genai.Client(api_key=api_key)
+
+        prompt_body = user_prompt
+        if schema_hint:
+            prompt_body = f"{user_prompt}\n\nRequired JSON output format:\n{schema_hint}"
+
+        config_obj = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.2,
+            response_mime_type="application/json",
+        )
+
+        try:
+            response = await asyncio.wait_for(
+                ai.aio.models.generate_content(
+                    model=model_name,
+                    contents=prompt_body,
+                    config=config_obj,
+                ),
+                timeout=45.0,
+            )
+            response_text = response.text or ""
+        except asyncio.TimeoutError:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Gemini AI analysis service timed out. Please try again.",
+            )
+        except Exception as e:
+            err_str = str(e).lower()
+            if "deadline" in err_str or "timeout" in err_str:
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="Gemini AI analysis service timed out. Please try again.",
+                )
+            if "resource_exhausted" in err_str or "429" in err_str or "quota" in err_str:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Gemini API rate limit reached. Please wait a moment before analyzing again.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Gemini API analysis service error: {e}",
+            )
+
+        if not response_text:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Gemini AI service returned an empty response.",
+            )
+
+        clean_text = response_text.strip()
+        if clean_text.startswith("```"):
+            lines = clean_text.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            clean_text = "\n".join(lines).strip()
+        first_brace = clean_text.find("{")
+        last_brace = clean_text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            clean_text = clean_text[first_brace : last_brace + 1]
+
+        try:
+            return json.loads(clean_text)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Gemini AI service returned an invalid JSON response format.",
+            )
 
     async def analyze(
         self,

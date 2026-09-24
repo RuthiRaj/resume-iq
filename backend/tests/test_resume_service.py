@@ -170,5 +170,5 @@ async def test_load_master_profile_concurrent_execution(monkeypatch):
     assert len(evidence.experience) == 1
     assert evidence.experience[0].role == "DevOps Lead"
     assert evidence.experience[0].bullets == ["Managed multi-region Kubernetes clusters."]
-    # Confirm 6 requests were dispatched
-    assert mock_client.get.call_count == 6
+    # Confirm 11 requests were dispatched (profile + 10 subcollections: experience, projects, skills, education, certifications, achievements, internships, publications, awards, volunteering)
+    assert mock_client.get.call_count == 11

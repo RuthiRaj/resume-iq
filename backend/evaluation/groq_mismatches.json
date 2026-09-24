@@ -1,0 +1,928 @@
+[
+  {
+    "case_id": "case_001_exact_match",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": true,
+    "predicted_evidence": "Architected high-throughput Python backend microservices processing 50M API calls/day.",
+    "acceptable_evidence": [
+      "Architected high-throughput Python backend microservices processing 50M API calls/day."
+    ]
+  },
+  {
+    "case_id": "case_001_exact_match",
+    "requirement": "PostgreSQL",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": true,
+    "predicted_evidence": "Optimized PostgreSQL database queries and connection pools, reducing P99 latency by 45%.",
+    "acceptable_evidence": [
+      "Optimized PostgreSQL database queries and connection pools, reducing P99 latency by 45%."
+    ]
+  },
+  {
+    "case_id": "case_001_exact_match",
+    "requirement": "FastAPI",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Designed RESTful API contracts using FastAPI and Pydantic validation schemas.",
+    "acceptable_evidence": [
+      "Designed RESTful API contracts using FastAPI and Pydantic validation schemas."
+    ]
+  },
+  {
+    "case_id": "case_001_exact_match",
+    "requirement": "Docker",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Containerized all backend services using Docker and orchestrated multi-container local testing.",
+    "acceptable_evidence": [
+      "Containerized all backend services using Docker and orchestrated multi-container local testing."
+    ]
+  },
+  {
+    "case_id": "case_002_semantic_synonym",
+    "requirement": "Amazon Web Services",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Deployed microservices to AWS Elastic Kubernetes Service (EKS) and automated S3 backups.",
+    "acceptable_evidence": [
+      "Deployed microservices to AWS Elastic Kubernetes Service (EKS) and automated S3 backups."
+    ]
+  },
+  {
+    "case_id": "case_002_semantic_synonym",
+    "requirement": "PostgreSQL",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Managed Postgres DB schemas and multi-region replication across 4 clusters.",
+    "acceptable_evidence": [
+      "Managed Postgres DB schemas and multi-region replication across 4 clusters."
+    ]
+  },
+  {
+    "case_id": "case_002_semantic_synonym",
+    "requirement": "React.js",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Built responsive web interfaces using React for internal developer portals.",
+    "acceptable_evidence": [
+      "Built responsive web interfaces using React for internal developer portals."
+    ]
+  },
+  {
+    "case_id": "case_002_semantic_synonym",
+    "requirement": "Kubernetes",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Maintained K8s manifests and Helm charts across staging and production environments.",
+    "acceptable_evidence": [
+      "Maintained K8s manifests and Helm charts across staging and production environments."
+    ]
+  },
+  {
+    "case_id": "case_003_adjacent_tech",
+    "requirement": "SQL",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "PartialMatch",
+    "expected_gap": "None",
+    "predicted_gap": "AdjacentTechnology",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Wrote complex SQL queries and analytical window functions for daily ETL pipelines.",
+    "acceptable_evidence": [
+      "Wrote complex SQL queries and analytical window functions for daily ETL pipelines."
+    ]
+  },
+  {
+    "case_id": "case_004_skill_tag_only",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Developed Python REST APIs for ecommerce order processing.",
+    "acceptable_evidence": [
+      "Developed Python REST APIs for ecommerce order processing."
+    ]
+  },
+  {
+    "case_id": "case_004_skill_tag_only",
+    "requirement": "TypeScript",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Engineered front-end components using TypeScript and modern CSS design systems.",
+    "acceptable_evidence": [
+      "Engineered front-end components using TypeScript and modern CSS design systems."
+    ]
+  },
+  {
+    "case_id": "case_004_skill_tag_only",
+    "requirement": "GraphQL",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "Missing",
+    "expected_gap": "MissingProductionExperience",
+    "predicted_gap": "MissingEvidence",
+    "expected_prov": "SkillTag",
+    "predicted_prov": "None",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "",
+    "acceptable_evidence": [
+      "GraphQL"
+    ]
+  },
+  {
+    "case_id": "case_004_skill_tag_only",
+    "requirement": "Redis",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "Missing",
+    "expected_gap": "MissingProductionExperience",
+    "predicted_gap": "MissingEvidence",
+    "expected_prov": "SkillTag",
+    "predicted_prov": "None",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "",
+    "acceptable_evidence": [
+      "Redis"
+    ]
+  },
+  {
+    "case_id": "case_005_production_experience",
+    "requirement": "PyTorch",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "PartialMatch",
+    "expected_gap": "MissingProductionExperience",
+    "predicted_gap": "AdjacentTechnology",
+    "expected_prov": "Project",
+    "predicted_prov": "Project",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Trained computer vision classification models in PyTorch for university capstone project.",
+    "acceptable_evidence": [
+      "Trained computer vision classification models in PyTorch for university capstone project."
+    ]
+  },
+  {
+    "case_id": "case_005_production_experience",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Wrote clean Python scripts for internal data pre-processing tools during 3-month internship.",
+    "acceptable_evidence": [
+      "Wrote clean Python scripts for internal data pre-processing tools during 3-month internship."
+    ]
+  },
+  {
+    "case_id": "case_005_production_experience",
+    "requirement": "Git",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Collaborated using Git version control and pull request code reviews.",
+    "acceptable_evidence": [
+      "Collaborated using Git version control and pull request code reviews."
+    ]
+  },
+  {
+    "case_id": "case_006_missing_requirement",
+    "requirement": "Kubernetes",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": true,
+    "predicted_evidence": "Managed multi-cluster Kubernetes deployments handling 10k RPS across AWS accounts.",
+    "acceptable_evidence": [
+      "Managed multi-cluster Kubernetes deployments handling 10k RPS across AWS accounts."
+    ]
+  },
+  {
+    "case_id": "case_006_missing_requirement",
+    "requirement": "Terraform",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Automated infrastructure provisioning using Terraform modules on AWS EC2 and VPC.",
+    "acceptable_evidence": [
+      "Automated infrastructure provisioning using Terraform modules on AWS EC2 and VPC."
+    ]
+  },
+  {
+    "case_id": "case_007_minimum_years",
+    "requirement": "Java",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "PartialMatch",
+    "expected_gap": "InsufficientExperienceYears",
+    "predicted_gap": "AdjacentTechnology",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": false,
+    "predicted_exp_years": true,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Engineered Java Spring Boot REST microservices for 2 years at Acme Corp.",
+    "acceptable_evidence": [
+      "Engineered Java Spring Boot REST microservices for 2 years at Acme Corp."
+    ]
+  },
+  {
+    "case_id": "case_007_minimum_years",
+    "requirement": "Spring Boot",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": true,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Engineered Java Spring Boot REST microservices for 2 years at Acme Corp.",
+    "acceptable_evidence": [
+      "Engineered Java Spring Boot REST microservices for 2 years at Acme Corp."
+    ]
+  },
+  {
+    "case_id": "case_007_minimum_years",
+    "requirement": "Microservices Architecture",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": true,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Engineered Java Spring Boot REST microservices for 2 years at Acme Corp.",
+    "acceptable_evidence": [
+      "Participated in microservices decomposition initiative for core billing module."
+    ]
+  },
+  {
+    "case_id": "case_007_minimum_years",
+    "requirement": "PostgreSQL",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Queried PostgreSQL for transaction audit logs and daily financial reconciliations.",
+    "acceptable_evidence": [
+      "Queried PostgreSQL for transaction audit logs and daily financial reconciliations."
+    ]
+  },
+  {
+    "case_id": "case_008_quantified_impact",
+    "requirement": "Performance Optimization",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": true,
+    "predicted_evidence": "Optimized backend API endpoints, reducing P95 latency from 450ms to 180ms (60% improvement) and cutting cloud hosting costs by $120,000 annually.",
+    "acceptable_evidence": [
+      "Optimized backend API endpoints, reducing P95 latency from 450ms to 180ms (60% improvement) and cutting cloud hosting costs by $120,000 annually."
+    ]
+  },
+  {
+    "case_id": "case_008_quantified_impact",
+    "requirement": "Node.js",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": true,
+    "predicted_evidence": "Built event-driven backend services in Node.js serving 1M daily active users.",
+    "acceptable_evidence": [
+      "Built event-driven backend services in Node.js serving 1M daily active users."
+    ]
+  },
+  {
+    "case_id": "case_008_quantified_impact",
+    "requirement": "Redis",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "PartialMatch",
+    "expected_gap": "MissingQuantification",
+    "predicted_gap": "MissingQuantification",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Integrated Redis cache layer to store user sessions.",
+    "acceptable_evidence": [
+      "Integrated Redis cache layer to store user sessions."
+    ]
+  },
+  {
+    "case_id": "case_008_quantified_impact",
+    "requirement": "AWS Lambda",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": true,
+    "predicted_evidence": "Migrated monolith functions to serverless AWS Lambda, scaling peak traffic capacity by 400%.",
+    "acceptable_evidence": [
+      "Migrated monolith functions to serverless AWS Lambda, scaling peak traffic capacity by 400%."
+    ]
+  },
+  {
+    "case_id": "case_009_leadership_seniority",
+    "requirement": "Technical Leadership",
+    "gt_found": true,
+    "expected_status": "Missing",
+    "predicted_status": "Missing",
+    "expected_gap": "MissingSeniority",
+    "predicted_gap": "MissingEvidence",
+    "expected_prov": "None",
+    "predicted_prov": "None",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "",
+    "acceptable_evidence": []
+  },
+  {
+    "case_id": "case_009_leadership_seniority",
+    "requirement": "System Architecture",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "PartialMatch",
+    "expected_gap": "InsufficientContext",
+    "predicted_gap": "AdjacentTechnology",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Contributed to architectural design reviews for platform components.",
+    "acceptable_evidence": [
+      "Contributed to architectural design reviews for platform components."
+    ]
+  },
+  {
+    "case_id": "case_009_leadership_seniority",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": true,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Wrote production Python backend code for 6 years supporting core ecommerce APIs.",
+    "acceptable_evidence": [
+      "Wrote production Python backend code for 6 years supporting core ecommerce APIs."
+    ]
+  },
+  {
+    "case_id": "case_010_project_evidence",
+    "requirement": "Vector Databases",
+    "gt_found": false,
+    "expected_status": "StrongMatch",
+    "predicted_status": "MISSING_PREDICTION",
+    "expected_gap": "None",
+    "predicted_gap": "NONE",
+    "expected_prov": "Project",
+    "predicted_prov": "NONE",
+    "expected_exp_years": true,
+    "predicted_exp_years": null,
+    "expected_quant": false,
+    "predicted_quant": null,
+    "predicted_evidence": "",
+    "acceptable_evidence": [
+      "Built open-source RAG search tool utilizing ChromaDB vector embeddings for document retrieval."
+    ]
+  },
+  {
+    "case_id": "case_010_project_evidence",
+    "requirement": "LangChain",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Project",
+    "predicted_prov": "Project",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Orchestrated multi-step agent workflows using LangChain and Python.",
+    "acceptable_evidence": [
+      "Orchestrated multi-step agent workflows using LangChain and Python."
+    ]
+  },
+  {
+    "case_id": "case_010_project_evidence",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Developed automated backend data parsing pipelines in Python for client CSV imports.",
+    "acceptable_evidence": [
+      "Developed automated backend data parsing pipelines in Python for client CSV imports."
+    ]
+  },
+  {
+    "case_id": "case_010_project_evidence",
+    "requirement": "Kubernetes",
+    "gt_found": true,
+    "expected_status": "Missing",
+    "predicted_status": "Missing",
+    "expected_gap": "MissingProjectEvidence",
+    "predicted_gap": "MissingEvidence",
+    "expected_prov": "None",
+    "predicted_prov": "None",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "",
+    "acceptable_evidence": []
+  },
+  {
+    "case_id": "case_011_certification",
+    "requirement": "AWS Solutions Architect Professional",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "Missing",
+    "expected_gap": "MissingCertification",
+    "predicted_gap": "MissingEvidence",
+    "expected_prov": "Certification",
+    "predicted_prov": "None",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "",
+    "acceptable_evidence": [
+      "AWS Certified Solutions Architect \u2013 Associate"
+    ]
+  },
+  {
+    "case_id": "case_011_certification",
+    "requirement": "Amazon Web Services",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "Missing",
+    "expected_gap": "None",
+    "predicted_gap": "MissingEvidence",
+    "expected_prov": "Experience",
+    "predicted_prov": "None",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "",
+    "acceptable_evidence": [
+      "Architected multi-region AWS cloud infrastructure using VPC, EC2, and CloudFront."
+    ]
+  },
+  {
+    "case_id": "case_011_certification",
+    "requirement": "Terraform",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Provisioned all AWS infrastructure as code using modular Terraform.",
+    "acceptable_evidence": [
+      "Provisioned all AWS infrastructure as code using modular Terraform."
+    ]
+  },
+  {
+    "case_id": "case_011_certification",
+    "requirement": "Security & Compliance",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Implemented SOC2 compliance security controls and IAM least-privilege policies.",
+    "acceptable_evidence": [
+      "Implemented SOC2 compliance security controls and IAM least-privilege policies."
+    ]
+  },
+  {
+    "case_id": "case_012_contradictory_evidence",
+    "requirement": "React",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "InsufficientContext",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": false,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Developed React web apps for local business clients.",
+    "acceptable_evidence": [
+      "Developed React web apps for local business clients.",
+      "10+ years expert React developer with deep frontend architecture expertise."
+    ]
+  },
+  {
+    "case_id": "case_012_contradictory_evidence",
+    "requirement": "JavaScript",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Wrote modern ES6+ JavaScript code for customer portal.",
+    "acceptable_evidence": [
+      "Wrote modern ES6+ JavaScript code for customer portal."
+    ]
+  },
+  {
+    "case_id": "case_012_contradictory_evidence",
+    "requirement": "Web Performance",
+    "gt_found": true,
+    "expected_status": "PartialMatch",
+    "predicted_status": "PartialMatch",
+    "expected_gap": "InsufficientContext",
+    "predicted_gap": "AdjacentTechnology",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Improved web page loading speed.",
+    "acceptable_evidence": [
+      "Improved web page loading speed."
+    ]
+  },
+  {
+    "case_id": "case_013_prompt_injection_jd",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Developed Python REST APIs using FastAPI.",
+    "acceptable_evidence": [
+      "Developed Python REST APIs using FastAPI."
+    ]
+  },
+  {
+    "case_id": "case_013_prompt_injection_jd",
+    "requirement": "SQL",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Wrote complex SQL queries in PostgreSQL.",
+    "acceptable_evidence": [
+      "Wrote complex SQL queries in PostgreSQL."
+    ]
+  },
+  {
+    "case_id": "case_013_prompt_injection_jd",
+    "requirement": "Docker",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": true,
+    "predicted_evidence": "Created optimized Docker containers for deployment.",
+    "acceptable_evidence": [
+      "Created optimized Docker containers for deployment."
+    ]
+  },
+  {
+    "case_id": "case_014_prompt_injection_resume",
+    "requirement": "Java",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Built backend Java microservices.",
+    "acceptable_evidence": [
+      "Built backend Java microservices."
+    ]
+  },
+  {
+    "case_id": "case_014_prompt_injection_resume",
+    "requirement": "Spring Boot",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Developed RESTful services using Spring Boot.",
+    "acceptable_evidence": [
+      "Developed RESTful services using Spring Boot."
+    ]
+  },
+  {
+    "case_id": "case_015_nontraditional_candidate",
+    "requirement": "SQL",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Project",
+    "predicted_prov": "Project",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": false,
+    "predicted_evidence": "Designed SQL relational databases and wrote queries to analyze student test score trends across 500+ students.",
+    "acceptable_evidence": [
+      "Designed SQL relational databases and wrote queries to analyze student test score trends across 500+ students."
+    ]
+  },
+  {
+    "case_id": "case_015_nontraditional_candidate",
+    "requirement": "Python",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Project",
+    "predicted_prov": "Project",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": false,
+    "predicted_quant": false,
+    "predicted_evidence": "Automated grade report generation using Python Pandas scripts.",
+    "acceptable_evidence": [
+      "Automated grade report generation using Python Pandas scripts."
+    ]
+  },
+  {
+    "case_id": "case_015_nontraditional_candidate",
+    "requirement": "Data Visualization",
+    "gt_found": true,
+    "expected_status": "StrongMatch",
+    "predicted_status": "StrongMatch",
+    "expected_gap": "None",
+    "predicted_gap": "None",
+    "expected_prov": "Experience",
+    "predicted_prov": "Experience",
+    "expected_exp_years": true,
+    "predicted_exp_years": false,
+    "expected_quant": true,
+    "predicted_quant": false,
+    "predicted_evidence": "Created interactive Tableau and Excel dashboards visualizing department performance metrics across 500+ students.",
+    "acceptable_evidence": [
+      "Created interactive Tableau and Excel dashboards visualizing department performance metrics across 500+ students."
+    ]
+  },
+  {
+    "case_id": "case_015_nontraditional_candidate",
+    "requirement": "Commercial Data Engineering",
+    "gt_found": false,
+    "expected_status": "Missing",
+    "predicted_status": "MISSING_PREDICTION",
+    "expected_gap": "MissingProductionExperience",
+    "predicted_gap": "NONE",
+    "expected_prov": "None",
+    "predicted_prov": "NONE",
+    "expected_exp_years": false,
+    "predicted_exp_years": null,
+    "expected_quant": false,
+    "predicted_quant": null,
+    "predicted_evidence": "",
+    "acceptable_evidence": []
+  }
+]

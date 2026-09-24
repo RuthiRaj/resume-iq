@@ -588,6 +588,47 @@ class TestVariantCreationTool:
 
 
 # ===========================================================================
+# Category 7.5: AI Edit Variant Tool
+# ===========================================================================
+
+class TestAiEditVariantTool:
+
+    @patch("app.mcp.mcp_server.resolve_mcp_user", return_value=USER_A)
+    @patch("app.mcp.mcp_server.ai_edit_limiter")
+    @patch("app.mcp.mcp_server.VariantService")
+    @pytest.mark.asyncio
+    async def test_ai_edit_variant_success(self, mock_vs, mock_limiter, mock_resolve):
+        from app.schemas.variant import AiEditProposalResponse
+
+        mock_limiter.check = AsyncMock()
+        mock_vs.propose_ai_edit = AsyncMock(return_value=AiEditProposalResponse(
+            originalText="Engineered Python web services.",
+            proposedText="Built Python web services.",
+            diff="- Engineered Python web services.\n+ Built Python web services.",
+            validation={"isValid": True, "status": "Valid", "unsupportedClaims": []},
+            requiresConfirmation=False,
+            userAttestedFacts=[],
+            targetItemId="exp_0",
+            targetBulletIndex=0,
+            version=1,
+        ))
+
+        ctx = _make_ctx()
+        result = await ms.ai_edit_variant(
+            ctx,
+            variant_id="var_abc123",
+            instruction="make shorter",
+            target_item_id="exp_0",
+            target_bullet_index=0,
+        )
+
+        assert result["originalText"] == "Engineered Python web services."
+        assert result["proposedText"] == "Built Python web services."
+        assert result["requiresConfirmation"] is False
+        assert result["version"] == 1
+
+
+# ===========================================================================
 # Category 8: Variant Apply Change + Master Immutability
 # ===========================================================================
 
@@ -961,7 +1002,8 @@ class TestMCPServerDefinition:
             "get_master_resume", "get_resume_data",
             "analyze_job_description", "get_analysis_results",
             "get_remediation", "synthesize_bullet", "apply_remediation",
-            "create_targeted_variant", "get_targeted_variant",
+            "create_targeted_variant", "get_targeted_variant", "generate_resume",
+            "ai_edit_variant",
             "apply_variant_change", "revert_variant_change", "compare_variant_fit",
             "export_targeted_resume",
         }

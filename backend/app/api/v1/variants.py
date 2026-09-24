@@ -1,9 +1,13 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, status, Response
 from app.core.auth import get_authenticated_user, AuthenticatedUser
 from app.schemas.variant import (
     TargetedResumeVariant,
     CreateTargetedVariantRequest,
+    GenerateResumeRequest,
     ApplyVariantChangeRequest,
+    AiEditVariantRequest,
+    AiEditProposalResponse,
     RevertChangeRequest,
     RevertChangeResponse,
     FitComparisonResponse,
@@ -11,10 +15,58 @@ from app.schemas.variant import (
     ChangeRecord,
 )
 from app.services.variant_service import VariantService
+from app.services.resume_generation_service import ResumeGenerationService
+from app.core.rate_limiter import resume_generation_limiter, ai_edit_limiter
 
 router = APIRouter(prefix="/variants", tags=["Targeted Resume Variants"])
 
 VARIANT_ID_PATTERN = r"^[a-zA-Z0-9_\-]+$"
+
+
+@router.post(
+    "/{variant_id}/ai-edit",
+    response_model=AiEditProposalResponse,
+    summary="Generate an unpersisted AI edit proposal for a single resume bullet or summary",
+)
+async def ai_edit_variant_endpoint(
+    variant_id: str = Path(..., pattern=VARIANT_ID_PATTERN, description="Variant ID"),
+    req: AiEditVariantRequest = ...,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> AiEditProposalResponse:
+    await ai_edit_limiter.check(current_user.uid)
+    try:
+        return await asyncio.wait_for(
+            VariantService.propose_ai_edit(current_user, variant_id, req),
+            timeout=90.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="AI edit timed out after 90 seconds. Please try again.",
+        )
+
+
+@router.post(
+    "/generate",
+    response_model=TargetedResumeVariant,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate a role-targeted resume variant with tailored bullets and executive summary",
+)
+async def generate_role_resume_endpoint(
+    req: GenerateResumeRequest,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> TargetedResumeVariant:
+    await resume_generation_limiter.check(current_user.uid)
+    try:
+        return await asyncio.wait_for(
+            ResumeGenerationService.generate_role_targeted_resume(current_user, req),
+            timeout=90.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Resume generation timed out after 90 seconds. Please try again.",
+        )
 
 
 @router.post(

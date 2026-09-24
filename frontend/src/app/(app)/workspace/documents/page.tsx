@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
 import { useCareer } from "@/lib/store";
 import { DocumentData } from "@/lib/validations";
@@ -10,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState } from "@/components/common/state-views";
+import { EmptyState, ToastBanner } from "@/components/common/state-views";
+import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
 import {
   Files,
@@ -103,6 +105,7 @@ interface IngestionDraftState {
   status: "Pending" | "Processing" | "Parsed" | "Completed" | "Failed";
   rawTextSnippet?: string;
   parsedData: ParsedCandidateData;
+  fileUrl?: string;
 }
 
 type IngestionPhase =
@@ -117,9 +120,16 @@ type IngestionPhase =
 
 export default function DocumentsPage() {
   const { user } = useAuth();
-  const { documents, addDocument, deleteDocument } = useCareer();
+  const { documents, addDocument, deleteDocument, isLoaded } = useCareer();
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<DocumentData | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   // Ingestion upload states
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -173,25 +183,36 @@ export default function DocumentsPage() {
       const data = await res.json();
       const draft: IngestionDraftState = data.draft;
 
-      // Also persist document entry in local career context
-      await addDocument(
-        {
-          name: draft.documentName,
-          type: docType,
-          fileSize: `${(draft.fileSizeBytes / 1024).toFixed(0)} KB`,
-          uploadDate: new Date().toISOString().split("T")[0],
-          parsedStatus: "Parsed",
-          content: draft.rawTextSnippet || `Extracted text from ${draft.documentName}`,
-        },
-        uploadFile
-      );
+      // Persist the document entry in local career context. This is
+      // intentionally NOT awaited-and-thrown into the outer catch: it's a
+      // secondary convenience record (so the doc shows in the library
+      // list), not part of the core parsing result the user is waiting on.
+      // A failure here must never make a successful AI parse look like a
+      // failed upload.
+      try {
+        await addDocument(
+          {
+            name: draft.documentName,
+            type: docType,
+            fileSize: `${(draft.fileSizeBytes / 1024).toFixed(0)} KB`,
+            uploadDate: new Date().toISOString().split("T")[0],
+            parsedStatus: "Parsed",
+            content: draft.rawTextSnippet || `Extracted text from ${draft.documentName}`,
+          },
+          draft.fileUrl
+        );
+      } catch (docErr) {
+        console.warn("Document library record failed to save (parsing still succeeded):", docErr);
+      }
 
       setActiveDraft(draft);
       setPhase("ReadyForReview");
       setIsUploadOpen(false);
       setUploadFile(null);
+      showToast("Document uploaded successfully", "success");
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to ingest document.");
+      showToast(err.message || "Failed to upload document. Please try again.", "error");
       setPhase("Failed");
     }
   };
@@ -227,19 +248,21 @@ export default function DocumentsPage() {
 
       setPhase("SuccessfullyImported");
       setStatusMessage("Career evidence successfully imported into master workspace!");
-
-      setTimeout(() => {
-        setActiveDraft(null);
-        setPhase("Idle");
-      }, 1800);
+      showToast("Career evidence imported to master workspace", "success");
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to confirm ingestion import.");
+      showToast(err.message || "Failed to confirm ingestion import.", "error");
       setPhase("ReadyForReview");
     }
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Original Documents & Transcripts</h2>
@@ -305,7 +328,13 @@ export default function DocumentsPage() {
                     <span>Preview Snippet</span>
                   </Button>
                   <Button
-                    onClick={() => doc.id && deleteDocument(doc.id)}
+                    onClick={() =>
+                      doc.id &&
+                      setItemToDelete({
+                        id: doc.id,
+                        name: doc.name,
+                      })
+                    }
                     variant="ghost"
                     size="sm"
                     className="text-status-error hover:bg-status-error-soft"
@@ -443,7 +472,7 @@ export default function DocumentsPage() {
                 className="gap-1.5 text-small"
               >
                 <Building className="h-3.5 w-3.5" />
-                <span>Experience ({activeDraft.parsedData.evidence.experience.length})</span>
+                <span>Experience ({(activeDraft.parsedData?.evidence?.experience || []).length})</span>
               </Button>
               <Button
                 variant={activeTab === "education" ? "primary" : "ghost"}
@@ -452,7 +481,7 @@ export default function DocumentsPage() {
                 className="gap-1.5 text-small"
               >
                 <GraduationCap className="h-3.5 w-3.5" />
-                <span>Education ({activeDraft.parsedData.evidence.education.length})</span>
+                <span>Education ({(activeDraft.parsedData?.evidence?.education || []).length})</span>
               </Button>
               <Button
                 variant={activeTab === "skills" ? "primary" : "ghost"}
@@ -461,7 +490,7 @@ export default function DocumentsPage() {
                 className="gap-1.5 text-small"
               >
                 <Wrench className="h-3.5 w-3.5" />
-                <span>Skills ({activeDraft.parsedData.evidence.skills.length})</span>
+                <span>Skills ({(activeDraft.parsedData?.evidence?.skills || []).length})</span>
               </Button>
               <Button
                 variant={activeTab === "projects" ? "primary" : "ghost"}
@@ -470,7 +499,7 @@ export default function DocumentsPage() {
                 className="gap-1.5 text-small"
               >
                 <FolderGit2 className="h-3.5 w-3.5" />
-                <span>Projects ({activeDraft.parsedData.evidence.projects.length})</span>
+                <span>Projects ({(activeDraft.parsedData?.evidence?.projects || []).length})</span>
               </Button>
               <Button
                 variant={activeTab === "certifications" ? "primary" : "ghost"}
@@ -479,7 +508,7 @@ export default function DocumentsPage() {
                 className="gap-1.5 text-small"
               >
                 <Award className="h-3.5 w-3.5" />
-                <span>Certs ({activeDraft.parsedData.evidence.certifications.length})</span>
+                <span>Certs ({(activeDraft.parsedData?.evidence?.certifications || []).length})</span>
               </Button>
             </div>
 
@@ -889,43 +918,73 @@ export default function DocumentsPage() {
               </div>
             )}
 
-            {phase === "SuccessfullyImported" && (
-              <div className="flex items-center gap-2 rounded-btn border border-status-success/30 bg-status-success-soft p-3 text-status-success text-small font-medium">
-                <CheckCircle2 className="h-4 w-4 shrink-0" />
-                <span>{statusMessage}</span>
+            {phase === "SuccessfullyImported" ? (
+              <div className="space-y-4 pt-2">
+                <div className="flex items-center gap-3 rounded-btn border border-status-success/30 bg-status-success-soft p-4 text-status-success text-small font-medium">
+                  <CheckCircle2 className="h-5 w-5 shrink-0" />
+                  <div>
+                    <p className="font-semibold text-body">Import Successful!</p>
+                    <p className="text-caption text-secondary">Career evidence and profile details have been hydrated into your Master Workspace.</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-border/60">
+                  <Link href="/workspace/experience">
+                    <Button type="button" variant="outline" className="gap-1.5">
+                      <FileText className="h-4 w-4" />
+                      <span>View Master Workspace</span>
+                    </Button>
+                  </Link>
+                  <Link href="/analyzer">
+                    <Button type="button" variant="primary" className="gap-1.5 shadow-subtle">
+                      <Sparkles className="h-4 w-4" />
+                      <span>Run ATS Audit</span>
+                    </Button>
+                  </Link>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setActiveDraft(null);
+                      setPhase("Idle");
+                    }}
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              /* Modal actions */
+              <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={phase === "Confirming"}
+                  onClick={() => setActiveDraft(null)}
+                >
+                  Discard Draft
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={phase === "Confirming"}
+                  onClick={handleConfirmImport}
+                  className="gap-1.5"
+                >
+                  {phase === "Confirming" ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Importing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-4 w-4" />
+                      <span>Confirm & Import to Master Workspace</span>
+                    </>
+                  )}
+                </Button>
               </div>
             )}
-
-            {/* Modal actions */}
-            <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={phase === "Confirming"}
-                onClick={() => setActiveDraft(null)}
-              >
-                Discard Draft
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                disabled={phase === "Confirming" || phase === "SuccessfullyImported"}
-                onClick={handleConfirmImport}
-                className="gap-1.5"
-              >
-                {phase === "Confirming" ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Importing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check className="h-4 w-4" />
-                    <span>Confirm & Import to Master Workspace</span>
-                  </>
-                )}
-              </Button>
-            </div>
           </div>
         </Modal>
       )}
@@ -965,6 +1024,26 @@ export default function DocumentsPage() {
           </div>
         </Modal>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(itemToDelete)}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={async () => {
+          if (!itemToDelete) return;
+          try {
+            await deleteDocument(itemToDelete.id);
+            showToast("Document deleted successfully", "success");
+          } catch (err: any) {
+            showToast("Failed to delete document. Please try again.", "error");
+          } finally {
+            setItemToDelete(null);
+          }
+        }}
+        title="Delete Document"
+        description="Are you sure you want to delete this document from your workspace? Extracted workspace records will not be removed."
+        itemName={itemToDelete?.name}
+      />
     </div>
   );
 }

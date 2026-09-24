@@ -19,6 +19,7 @@ from app.schemas.ingestion import (
     IngestionConfirmResponse,
 )
 from app.services.document_extractor import extract_document_text, sanitize_filename
+from app.services.cloud_storage_service import upload_document_backup
 from app.ai.ingestion_parser import parse_resume_text
 from app.services.profile_service import ProfileService
 from app.services.resume_service import (
@@ -54,6 +55,16 @@ class IngestionService:
         # Parse raw text into structured profile draft
         parsed_data = await parse_resume_text(raw_text)
 
+        # Best-effort backup of the original file to Cloudinary. This NEVER
+        # raises and NEVER blocks ingestion -- see cloud_storage_service.py
+        # for why. If it fails or isn't configured, file_url is simply None
+        # and the draft still completes successfully.
+        file_url = await upload_document_backup(
+            content=content,
+            filename=clean_name,
+            user_id=user.uid,
+        )
+
         draft = IngestionDraft(
             ingestion_id=ingestion_id,
             document_name=clean_name,
@@ -64,6 +75,7 @@ class IngestionService:
             raw_text_char_count=len(raw_text),
             parsed_data=parsed_data,
             error_message=None,
+            file_url=file_url,
             created_at=now_iso,
             updated_at=now_iso,
             completed_at=None,
@@ -227,6 +239,9 @@ class IngestionService:
                     detail=f"Failed to save {col_name} entity to master workspace (status {res.status_code}).",
                 )
 
+        doc_src_id = clean_id
+        doc_src_name = draft.document_name or ""
+
         # 1. Hydrate Profile
         if reviewed_data.profile:
             await ProfileService.save_profile(user, reviewed_data.profile)
@@ -254,6 +269,8 @@ class IngestionService:
                 "isCurrent": (exp.end_date or "").strip().lower() in ("present", "current"),
                 "bullets": exp.bullets or [],
                 "technologies": exp.technologies or [],
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("experience", matched_id, payload)
             summary["experience"] += 1
@@ -275,6 +292,8 @@ class IngestionService:
                 "degree": edu.degree or "",
                 "institution": edu.institution or "",
                 "fieldOfStudy": edu.field_of_study or "",
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("education", matched_id, payload)
             summary["education"] += 1
@@ -296,6 +315,8 @@ class IngestionService:
                 "name": sk.name,
                 "category": sk.category or "Technical",
                 "proficiency": sk.proficiency or "Intermediate",
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("skills", matched_id, payload)
             summary["skills"] += 1
@@ -319,6 +340,8 @@ class IngestionService:
                 "description": proj.description or "",
                 "highlights": proj.highlights or [],
                 "techStack": proj.tech_stack or [],
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("projects", matched_id, payload)
             summary["projects"] += 1
@@ -339,6 +362,8 @@ class IngestionService:
             payload = {
                 "title": cert.title,
                 "issuer": cert.issuer or "",
+                "sourceDocumentId": doc_src_id,
+                "sourceDocumentName": doc_src_name,
             }
             await _save_doc("certifications", matched_id, payload)
             summary["certifications"] += 1

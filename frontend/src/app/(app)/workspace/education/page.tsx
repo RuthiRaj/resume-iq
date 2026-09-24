@@ -10,7 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState } from "@/components/common/state-views";
+import { EmptyState, ToastBanner } from "@/components/common/state-views";
+import { ConfirmDeleteModal } from "@/components/common/confirm-delete-modal";
 import { formatDate } from "@/lib/utils";
 import {
   GraduationCap,
@@ -21,14 +22,27 @@ import {
   Award,
   BookOpen,
   X,
+  Loader2,
+  AlertCircle,
 } from "lucide-react";
 
 export default function EducationPage() {
-  const { education, addEducation, updateEducation, deleteEducation } = useCareer();
+  const { education, addEducation, updateEducation, deleteEducation, isLoaded } = useCareer();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [courseInput, setCourseInput] = useState("");
   const [coursesList, setCoursesList] = useState<string[]>([]);
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const [itemToDelete, setItemToDelete] = useState<{ id: string; name: string } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const {
     register,
@@ -42,6 +56,7 @@ export default function EducationPage() {
 
   const handleOpenAdd = () => {
     setEditingId(null);
+    setSubmitError(null);
     setCoursesList([]);
     reset({
       institution: "",
@@ -58,6 +73,7 @@ export default function EducationPage() {
 
   const handleOpenEdit = (item: EducationData) => {
     setEditingId(item.id || null);
+    setSubmitError(null);
     setCoursesList(item.courses || []);
     reset({
       institution: item.institution,
@@ -88,18 +104,47 @@ export default function EducationPage() {
     setValue("courses", updated);
   };
 
-  const onSubmit = (data: EducationData) => {
+  const onSubmit = async (data: EducationData) => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+
     const submission = { ...data, courses: coursesList };
-    if (editingId) {
-      updateEducation(editingId, submission);
-    } else {
-      addEducation(submission);
+    try {
+      if (editingId) {
+        await updateEducation(editingId, submission);
+        showToast("Education updated successfully", "success");
+      } else {
+        await addEducation(submission);
+        showToast("Education added successfully", "success");
+      }
+      setIsModalOpen(false);
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to save education. Please try again.");
+      showToast("Failed to save education. Please try again.", "error");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsModalOpen(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!itemToDelete) return;
+    try {
+      await deleteEducation(itemToDelete.id);
+      showToast("Education deleted successfully", "success");
+    } catch (err: any) {
+      showToast("Failed to delete education. Please try again.", "error");
+    } finally {
+      setItemToDelete(null);
+    }
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-h2 font-semibold text-primary">Degrees & Academic Credentials</h2>
@@ -113,7 +158,19 @@ export default function EducationPage() {
         </Button>
       </div>
 
-      {education.length === 0 ? (
+      {!isLoaded ? (
+        <div className="space-y-4">
+          {[1, 2].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-5 space-y-3">
+                <div className="h-5 bg-border/60 rounded w-1/3" />
+                <div className="h-4 bg-border/40 rounded w-1/4" />
+                <div className="h-8 bg-border/30 rounded w-full" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : education.length === 0 ? (
         <EmptyState
           title="No education added yet"
           description="Add your degree details, coursework, and honors to boost your Career Signal score."
@@ -150,23 +207,18 @@ export default function EducationPage() {
 
                     {item.activities && (
                       <p className="text-small text-secondary pt-1">
-                        <span className="font-semibold text-primary">Honors & Activities: </span>
+                        <span className="font-medium text-primary">Activities / Honors: </span>
                         {item.activities}
                       </p>
                     )}
 
                     {item.courses && item.courses.length > 0 && (
-                      <div className="pt-2">
-                        <div className="text-caption font-semibold text-muted uppercase mb-1.5">
-                          Relevant Coursework
-                        </div>
-                        <div className="flex flex-wrap gap-1.5">
-                          {item.courses.map((course) => (
-                            <Badge key={course} variant="outline" className="text-secondary bg-page">
-                              {course}
-                            </Badge>
-                          ))}
-                        </div>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                        {item.courses.map((course) => (
+                          <Badge key={course} variant="outline" className="bg-page text-secondary">
+                            {course}
+                          </Badge>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -182,10 +234,16 @@ export default function EducationPage() {
                       <span>Edit</span>
                     </Button>
                     <Button
-                      onClick={() => item.id && deleteEducation(item.id)}
+                      onClick={() =>
+                        item.id &&
+                        setItemToDelete({
+                          id: item.id,
+                          name: `${item.degree} @ ${item.institution}`,
+                        })
+                      }
                       variant="ghost"
                       size="sm"
-                      className="text-status-error hover:bg-status-error-soft hover:text-status-error"
+                      className="text-status-error hover:bg-status-error-soft"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </Button>
@@ -197,19 +255,26 @@ export default function EducationPage() {
         </div>
       )}
 
-      {/* Add/Edit Modal */}
+      {/* Add / Edit Modal */}
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? "Edit Academic Degree" : "Add Academic Degree"}
-        description="Provide institution, degree name, dates, and relevant coursework."
-        maxWidth="2xl"
+        title={editingId ? "Edit Degree" : "Add Degree"}
+        description="Provide university name, degree title, major, date range, and coursework."
+        maxWidth="xl"
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          {submitError && (
+            <div className="flex items-center gap-2 rounded-btn bg-status-error-soft p-3 text-status-error text-small font-medium border border-status-error/20">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Institution / University</label>
+            <label className="text-small font-medium text-primary">Institution / University *</label>
             <Input
-              placeholder="e.g. University of California, Berkeley"
+              placeholder="e.g. Stanford University or MIT"
               {...register("institution")}
               className={errors.institution ? "border-status-error" : ""}
             />
@@ -220,9 +285,9 @@ export default function EducationPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Degree</label>
+              <label className="text-small font-medium text-primary">Degree *</label>
               <Input
-                placeholder="e.g. B.S. in Computer Science"
+                placeholder="e.g. B.S. or Master of Science"
                 {...register("degree")}
                 className={errors.degree ? "border-status-error" : ""}
               />
@@ -232,9 +297,9 @@ export default function EducationPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Field of Study</label>
+              <label className="text-small font-medium text-primary">Field of Study *</label>
               <Input
-                placeholder="e.g. Computer Science"
+                placeholder="e.g. Computer Science & AI"
                 {...register("fieldOfStudy")}
                 className={errors.fieldOfStudy ? "border-status-error" : ""}
               />
@@ -246,9 +311,9 @@ export default function EducationPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Start Date (YYYY-MM)</label>
+              <label className="text-small font-medium text-primary">Start Date (YYYY-MM) *</label>
               <Input
-                placeholder="e.g. 2020-08"
+                placeholder="2018-09"
                 {...register("startDate")}
                 className={errors.startDate ? "border-status-error" : ""}
               />
@@ -258,9 +323,9 @@ export default function EducationPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">End Date (or Expected)</label>
+              <label className="text-small font-medium text-primary">End Date (or Expected) *</label>
               <Input
-                placeholder="e.g. 2024-05"
+                placeholder="2022-06"
                 {...register("endDate")}
                 className={errors.endDate ? "border-status-error" : ""}
               />
@@ -272,25 +337,22 @@ export default function EducationPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Grade / GPA (Optional)</label>
-              <Input placeholder="e.g. 3.88 / 4.0 GPA" {...register("grade")} />
+              <label className="text-small font-medium text-primary">GPA / Grade / Honors</label>
+              <Input placeholder="e.g. 3.92 / 4.0 (Magna Cum Laude)" {...register("grade")} />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-small font-medium text-primary">Honors & Activities</label>
-              <Input
-                placeholder="e.g. Dean's Honors List, Lead Chair @ ACM"
-                {...register("activities")}
-              />
+              <label className="text-small font-medium text-primary">Activities & Societies</label>
+              <Input placeholder="e.g. ACM President, Robotics Club" {...register("activities")} />
             </div>
           </div>
 
-          {/* Coursework Tags */}
+          {/* Courses */}
           <div className="space-y-2">
             <label className="text-small font-medium text-primary">Relevant Coursework</label>
             <div className="flex gap-2">
               <Input
-                placeholder="e.g. Distributed Systems"
+                placeholder="e.g. Distributed Systems, Machine Learning"
                 value={courseInput}
                 onChange={(e) => setCourseInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -318,15 +380,32 @@ export default function EducationPage() {
           </div>
 
           <div className="flex justify-end gap-2.5 pt-4 border-t border-border/60">
-            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)}>
+            <Button type="button" variant="ghost" onClick={() => setIsModalOpen(false)} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary">
-              {editingId ? "Save Changes" : "Add Degree"}
+            <Button type="submit" variant="primary" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>{editingId ? "Save Changes" : "Add Degree"}</span>
+              )}
             </Button>
           </div>
         </form>
       </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(itemToDelete)}
+        onClose={() => setItemToDelete(null)}
+        onConfirm={handleDeleteConfirm}
+        title="Delete Academic Degree"
+        description="Are you sure you want to delete this degree record from your Master Career Workspace? Existing targeted resume variants will not be affected."
+        itemName={itemToDelete?.name}
+      />
     </div>
   );
 }

@@ -10,14 +10,19 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, Save, Plus, X, Globe, Linkedin, Github, RefreshCw, AlertCircle } from "lucide-react";
+import { ToastBanner } from "@/components/common/state-views";
+import { Save, Plus, X, Globe, Linkedin, Github, RefreshCw } from "lucide-react";
 
 export default function ProfilePage() {
-  const { profile, updateProfile } = useCareer();
-  const [savedSuccess, setSavedSuccess] = useState(false);
+  const { profile, updateProfile, isLoaded } = useCareer();
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [targetRoleInput, setTargetRoleInput] = useState("");
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const {
     register,
@@ -32,10 +37,10 @@ export default function ProfilePage() {
   });
 
   React.useEffect(() => {
-    if (profile && !isDirty) {
+    if (profile && !isDirty && isLoaded) {
       reset(profile);
     }
-  }, [profile, reset, isDirty]);
+  }, [profile, reset, isDirty, isLoaded]);
 
   const targetRoles = watch("targetRoles") || [];
 
@@ -57,7 +62,6 @@ export default function ProfilePage() {
 
   const onSubmit = async (data: ProfileData) => {
     setIsSaving(true);
-    setSaveError(null);
 
     // If a target role was typed in but not yet added via button, include it
     let finalRoles = [...(data.targetRoles || [])];
@@ -74,10 +78,9 @@ export default function ProfilePage() {
     try {
       await updateProfile(payload);
       reset(payload);
-      setSavedSuccess(true);
-      setTimeout(() => setSavedSuccess(false), 4000);
+      showToast("Profile saved successfully", "success");
     } catch (err: any) {
-      setSaveError(err.message || "Failed to save profile changes. Please try again.");
+      showToast(err.message || "Failed to save profile. Please try again.", "error");
     } finally {
       setIsSaving(false);
     }
@@ -93,22 +96,17 @@ export default function ProfilePage() {
           </p>
         </div>
 
-        {savedSuccess && (
-          <div className="flex items-center gap-1.5 text-status-success text-small font-medium bg-status-success-soft px-3 py-1.5 rounded-btn border border-status-success/20 animate-in fade-in duration-200">
-            <CheckCircle2 className="h-4 w-4" />
-            <span>Profile saved successfully</span>
-          </div>
-        )}
-
-        {saveError && (
-          <div className="flex items-center gap-1.5 text-status-error text-small font-medium bg-status-error-soft px-3 py-1.5 rounded-btn border border-status-error/20">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>{saveError}</span>
-          </div>
+        {toast && (
+          <ToastBanner message={toast.message} type={toast.type} />
         )}
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      <form
+        onSubmit={handleSubmit(onSubmit, (errs) =>
+          showToast("Please fix: " + Object.keys(errs).join(", "), "error")
+        )}
+        className="space-y-6"
+      >
         <Card>
           <CardHeader>
             <CardTitle>Contact & Identity</CardTitle>
@@ -198,6 +196,9 @@ export default function ProfilePage() {
                   {...register("website")}
                   className={errors.website ? "border-status-error" : ""}
                 />
+                {errors.website && (
+                  <p className="text-caption text-status-error">{errors.website.message}</p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -210,6 +211,9 @@ export default function ProfilePage() {
                   {...register("linkedin")}
                   className={errors.linkedin ? "border-status-error" : ""}
                 />
+                {errors.linkedin && (
+                  <p className="text-caption text-status-error">{errors.linkedin.message}</p>
+                )}
               </div>
 
               <div className="space-y-1.5">
@@ -222,6 +226,9 @@ export default function ProfilePage() {
                   {...register("github")}
                   className={errors.github ? "border-status-error" : ""}
                 />
+                {errors.github && (
+                  <p className="text-caption text-status-error">{errors.github.message}</p>
+                )}
               </div>
             </div>
           </CardContent>

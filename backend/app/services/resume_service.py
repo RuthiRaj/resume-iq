@@ -12,6 +12,11 @@ from app.schemas.candidate import (
     SkillItem,
     EducationItem,
     CertificationItem,
+    AchievementItem,
+    InternshipItem,
+    PublicationItem,
+    AwardItem,
+    VolunteeringItem,
 )
 from app.schemas.analyze import AnalyzeResponse
 
@@ -146,14 +151,19 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             pass
         return []
 
-    # Concurrent fetch across profile and all 5 subcollections
-    profile_data, exp_docs, proj_docs, skill_docs, edu_docs, cert_docs = await asyncio.gather(
+    # Concurrent fetch across profile and all 10 subcollections
+    profile_data, exp_docs, proj_docs, skill_docs, edu_docs, cert_docs, ach_docs, intern_docs, pub_docs, award_docs, vol_docs = await asyncio.gather(
         _fetch_doc(f"{base_url}/profile/main"),
         _fetch_subcollection(f"{base_url}/experience"),
         _fetch_subcollection(f"{base_url}/projects"),
         _fetch_subcollection(f"{base_url}/skills"),
         _fetch_subcollection(f"{base_url}/education"),
         _fetch_subcollection(f"{base_url}/certifications"),
+        _fetch_subcollection(f"{base_url}/achievements"),
+        _fetch_subcollection(f"{base_url}/internships"),
+        _fetch_subcollection(f"{base_url}/publications"),
+        _fetch_subcollection(f"{base_url}/awards"),
+        _fetch_subcollection(f"{base_url}/volunteering"),
     )
 
     experience = [
@@ -166,6 +176,8 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             end_date="Present" if d.get("isCurrent") else d.get("endDate", ""),
             bullets=d.get("bullets", []),
             technologies=d.get("technologies", []),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
         )
         for i, d in enumerate(exp_docs)
     ]
@@ -178,34 +190,117 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             description=d.get("description", ""),
             highlights=d.get("highlights", []),
             tech_stack=d.get("techStack", []),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
         )
         for i, d in enumerate(proj_docs)
     ]
 
     skills = [
         SkillItem(
+            id=d.get("id", f"skill_{i}"),
             name=d.get("name", ""),
             category=d.get("category", "Technical"),
             proficiency=d.get("proficiency", "Intermediate"),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
         )
-        for d in skill_docs
+        for i, d in enumerate(skill_docs)
     ]
 
     education = [
         EducationItem(
+            id=d.get("id", f"edu_{i}"),
             degree=d.get("degree", ""),
             institution=d.get("institution", ""),
             field_of_study=d.get("fieldOfStudy", ""),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
         )
-        for d in edu_docs
+        for i, d in enumerate(edu_docs)
     ]
 
     certifications = [
         CertificationItem(
+            id=d.get("id", f"cert_{i}"),
             title=d.get("title", ""),
             issuer=d.get("issuer", ""),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
         )
-        for d in cert_docs
+        for i, d in enumerate(cert_docs)
+    ]
+
+    achievements = [
+        AchievementItem(
+            id=d.get("id", f"ach_{i}"),
+            title=d.get("title", ""),
+            issuer=d.get("issuer", ""),
+            date=d.get("date", ""),
+            description=d.get("description", ""),
+            url=d.get("url", ""),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
+        )
+        for i, d in enumerate(ach_docs)
+    ]
+
+    internships = [
+        InternshipItem(
+            id=d.get("id", f"intern_{i}"),
+            role=d.get("role", ""),
+            company=d.get("company", ""),
+            location=d.get("location", ""),
+            start_date=d.get("startDate", ""),
+            end_date="Present" if d.get("isCurrent") else d.get("endDate", ""),
+            bullets=d.get("bullets", []),
+            technologies=d.get("technologies", []),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
+        )
+        for i, d in enumerate(intern_docs)
+    ]
+
+    publications = [
+        PublicationItem(
+            id=d.get("id", f"pub_{i}"),
+            title=d.get("title", ""),
+            publisher=d.get("publisher", ""),
+            publication_date=d.get("publicationDate", ""),
+            url=d.get("url", ""),
+            description=d.get("description", ""),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
+        )
+        for i, d in enumerate(pub_docs)
+    ]
+
+    awards = [
+        AwardItem(
+            id=d.get("id", f"award_{i}"),
+            title=d.get("title", ""),
+            issuer=d.get("issuer", ""),
+            date=d.get("date", ""),
+            description=d.get("description", ""),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
+        )
+        for i, d in enumerate(award_docs)
+    ]
+
+    volunteering = [
+        VolunteeringItem(
+            id=d.get("id", f"vol_{i}"),
+            role=d.get("role", ""),
+            organization=d.get("organization", ""),
+            start_date=d.get("startDate", ""),
+            end_date=d.get("endDate", ""),
+            description=d.get("description", ""),
+            highlights=d.get("highlights", []),
+            source_document_id=d.get("sourceDocumentId"),
+            source_document_name=d.get("sourceDocumentName"),
+        )
+        for i, d in enumerate(vol_docs)
     ]
 
     return CandidateEvidence(
@@ -216,6 +311,11 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
         skills=skills,
         education=education,
         certifications=certifications,
+        achievements=achievements,
+        internships=internships,
+        publications=publications,
+        awards=awards,
+        volunteering=volunteering,
     )
 
 
@@ -304,6 +404,17 @@ async def get_candidate_resume_data(
             )
             for c in snapshot.get("certifications", [])
         ]
+        achievements = [
+            AchievementItem(
+                id=a.get("id"),
+                title=a.get("title", ""),
+                issuer=a.get("issuer", ""),
+                date=a.get("date", ""),
+                description=a.get("description", ""),
+                url=a.get("url", ""),
+            )
+            for a in snapshot.get("achievements", [])
+        ]
 
         return CandidateEvidence(
             headline=profile.get("headline", ""),
@@ -313,6 +424,7 @@ async def get_candidate_resume_data(
             skills=skills,
             education=education,
             certifications=certifications,
+            achievements=achievements,
         )
 
     # Priority 2: Legacy fallback
