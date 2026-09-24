@@ -390,6 +390,29 @@ export interface TargetedResumeVariant {
   updated_at?: string;
 }
 
+export interface EvidenceProvenanceDetailData {
+  evidenceId: string;
+  evidence_id?: string;
+  userId: string;
+  user_id?: string;
+  sourceType: string;
+  source_type?: string;
+  sourceItemId: string;
+  source_item_id?: string;
+  title: string;
+  sourceDocumentId?: string | null;
+  source_document_id?: string | null;
+  sourceDocumentName?: string | null;
+  source_document_name?: string | null;
+  ingestionDraftStatus?: string | null;
+  ingestion_draft_status?: string | null;
+  fileUrl?: string | null;
+  file_url?: string | null;
+  verificationStatus: "verified" | "unverified" | "user_confirmed" | "missing" | "related_unverified" | string;
+  verification_status?: string;
+  confidence: number;
+}
+
 export type SectionPlan = SectionPlanData;
 export type SelectedEvidenceItem = SelectedEvidenceData;
 export type ExcludedEvidenceItem = ExcludedEvidenceData;
@@ -398,6 +421,7 @@ export type HardGap = HardGapData;
 export type RequirementStrategy = RequirementStrategyData;
 export type ResumePlan = ResumePlanData;
 export type GenerationMetadata = GenerationMetadataData;
+export type EvidenceProvenanceDetail = EvidenceProvenanceDetailData;
 export type ChangeRecord = ChangeRecordData;
 export type RequirementProgression = RequirementProgressionData;
 export type FitComparisonResponse = FitComparisonData;

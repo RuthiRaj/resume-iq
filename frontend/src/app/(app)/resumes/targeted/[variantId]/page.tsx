@@ -9,6 +9,7 @@ import {
   ChangeRecord,
   FitComparisonResponse,
   ExportTargetedResumeResponse,
+  EvidenceProvenanceDetail,
 } from "@/lib/store";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,12 +38,14 @@ import {
   FileText,
   GraduationCap,
   History,
+  Info,
   Layers,
   ListChecks,
   Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldCheck,
   Sparkles,
   TrendingUp,
@@ -82,6 +85,17 @@ export default function TargetedResumeWorkspacePage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  // Evidence Provenance State & In-Memory Cache
+  const [provenanceCache, setProvenanceCache] = useState<Record<string, EvidenceProvenanceDetail>>({});
+  const [isProvenanceModalOpen, setIsProvenanceModalOpen] = useState(false);
+  const [provenanceEvidenceId, setProvenanceEvidenceId] = useState<string>("");
+  const [provenanceItemTitle, setProvenanceItemTitle] = useState<string>("");
+  const [provenanceSelectionReason, setProvenanceSelectionReason] = useState<string | null>(null);
+  const [provenanceMatchedSkills, setProvenanceMatchedSkills] = useState<string[] | null>(null);
+  const [provenanceData, setProvenanceData] = useState<EvidenceProvenanceDetail | null>(null);
+  const [isProvenanceLoading, setIsProvenanceLoading] = useState(false);
+  const [provenanceError, setProvenanceError] = useState<string | null>(null);
 
   // Manual Edit Modal State
   const [isManualEditModalOpen, setIsManualEditModalOpen] = useState(false);
@@ -180,6 +194,109 @@ export default function TargetedResumeWorkspacePage() {
       console.warn("Could not load fit comparison:", err);
     }
   }, [user, variantId]);
+
+  // Handle opening Evidence Provenance Lineage modal with in-memory caching
+  const handleOpenProvenance = useCallback(
+    async (
+      evidenceId: string,
+      itemTitle?: string,
+      selectionReason?: string,
+      matchedSkills?: string[],
+      fallbackEntity?: {
+        sourceDocumentId?: string | null;
+        sourceDocumentName?: string | null;
+        sourceType?: string;
+        sourceItemId?: string;
+        title?: string;
+      }
+    ) => {
+      setProvenanceEvidenceId(evidenceId);
+      setProvenanceItemTitle(itemTitle || fallbackEntity?.title || evidenceId);
+      setProvenanceSelectionReason(selectionReason || null);
+      setProvenanceMatchedSkills(matchedSkills || null);
+      setProvenanceError(null);
+      setIsProvenanceModalOpen(true);
+
+      // 1. Check in-memory session cache first
+      if (provenanceCache[evidenceId]) {
+        setProvenanceData(provenanceCache[evidenceId]);
+        setIsProvenanceLoading(false);
+        return;
+      }
+
+      // 2. Fetch from backend proxy route
+      if (!user) {
+        setProvenanceError("You must be signed in to view evidence provenance.");
+        return;
+      }
+
+      setIsProvenanceLoading(true);
+      try {
+        const idToken = await user.getIdToken();
+        const res = await fetch(
+          `/api/resumes/evidence/${encodeURIComponent(evidenceId)}/provenance`,
+          {
+            headers: { Authorization: `Bearer ${idToken}` },
+          }
+        );
+
+        if (res.status === 404) {
+          // If 404 from backend (e.g. offline workspace item or legacy), use snapshot entity data
+          if (fallbackEntity) {
+            const fallbackData: EvidenceProvenanceDetail = {
+              evidenceId,
+              userId: user.uid,
+              sourceType: fallbackEntity.sourceType || "experience",
+              sourceItemId: fallbackEntity.sourceItemId || evidenceId,
+              title: fallbackEntity.title || itemTitle || evidenceId,
+              sourceDocumentId: fallbackEntity.sourceDocumentId || null,
+              sourceDocumentName: fallbackEntity.sourceDocumentName || null,
+              ingestionDraftStatus: fallbackEntity.sourceDocumentId ? "Imported" : null,
+              fileUrl: null,
+              verificationStatus: "verified",
+              confidence: 1.0,
+            };
+            setProvenanceData(fallbackData);
+            setProvenanceCache((prev) => ({ ...prev, [evidenceId]: fallbackData }));
+          } else {
+            setProvenanceData(null);
+            setProvenanceError("Historical provenance is not available for this evidence item.");
+          }
+          return;
+        }
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || data.error || "Failed to load evidence provenance.");
+        }
+
+        setProvenanceData(data);
+        setProvenanceCache((prev) => ({ ...prev, [evidenceId]: data }));
+      } catch (err: any) {
+        if (fallbackEntity) {
+          const fallbackData: EvidenceProvenanceDetail = {
+            evidenceId,
+            userId: user.uid,
+            sourceType: fallbackEntity.sourceType || "experience",
+            sourceItemId: fallbackEntity.sourceItemId || evidenceId,
+            title: fallbackEntity.title || itemTitle || evidenceId,
+            sourceDocumentId: fallbackEntity.sourceDocumentId || null,
+            sourceDocumentName: fallbackEntity.sourceDocumentName || null,
+            ingestionDraftStatus: fallbackEntity.sourceDocumentId ? "Imported" : null,
+            fileUrl: null,
+            verificationStatus: "verified",
+            confidence: 1.0,
+          };
+          setProvenanceData(fallbackData);
+        } else {
+          setProvenanceError(err.message || "Failed to load evidence provenance.");
+        }
+      } finally {
+        setIsProvenanceLoading(false);
+      }
+    },
+    [user, provenanceCache]
+  );
 
   useEffect(() => {
     fetchVariant();
@@ -988,6 +1105,37 @@ export default function TargetedResumeWorkspacePage() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              onClick={() => {
+                                const matchingEv = (plan?.selectedEvidence || plan?.selected_evidence || []).find(
+                                  (ev: any) =>
+                                    (ev.sourceItemId && (ev.sourceItemId === exp.id || ev.sourceItemId === itemId)) ||
+                                    (ev.source_item_id && (ev.source_item_id === exp.id || ev.source_item_id === itemId)) ||
+                                    (ev.evidenceId && ev.evidenceId === exp.id) ||
+                                    (ev.evidence_id && ev.evidence_id === exp.id)
+                                );
+                                handleOpenProvenance(
+                                  matchingEv?.evidenceId || matchingEv?.evidence_id || exp.evidenceId || exp.id || itemId,
+                                  exp.position ? `${exp.position} at ${exp.company}` : exp.company || "Experience Item",
+                                  matchingEv?.selectionReason || matchingEv?.selection_reason,
+                                  matchingEv?.matchedSkills || matchingEv?.matched_skills,
+                                  {
+                                    sourceDocumentId: exp.sourceDocumentId || exp.source_document_id || null,
+                                    sourceDocumentName: exp.sourceDocumentName || exp.source_document_name || null,
+                                    sourceType: "experience",
+                                    sourceItemId: exp.id || itemId,
+                                    title: exp.position ? `${exp.position} at ${exp.company}` : exp.company || "Experience Item",
+                                  }
+                                );
+                              }}
+                              className="h-6 px-1.5 text-[11px] text-muted hover:text-accent gap-1"
+                              title="Trace workspace evidence provenance"
+                            >
+                              <Search className="h-3 w-3" />
+                              <span>Provenance</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               onClick={() => openApplyModal("Experience", itemId, exp.bullets.length)}
                               className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
                               title="Add new bullet point"
@@ -1080,16 +1228,49 @@ export default function TargetedResumeWorkspacePage() {
                             <strong className="text-body font-semibold text-primary">{proj.title}</strong>
                             {proj.role && <span className="text-caption text-muted ml-2">({proj.role})</span>}
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => openApplyModal("Project", itemId, highlights.length)}
-                            className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
-                            title="Add highlight"
-                          >
-                            <Plus className="h-3 w-3" />
-                            <span>Add Highlight</span>
-                          </Button>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const matchingEv = (plan?.selectedEvidence || plan?.selected_evidence || []).find(
+                                  (ev: any) =>
+                                    (ev.sourceItemId && (ev.sourceItemId === proj.id || ev.sourceItemId === itemId)) ||
+                                    (ev.source_item_id && (ev.source_item_id === proj.id || ev.source_item_id === itemId)) ||
+                                    (ev.evidenceId && ev.evidenceId === proj.id) ||
+                                    (ev.evidence_id && ev.evidence_id === proj.id)
+                                );
+                                handleOpenProvenance(
+                                  matchingEv?.evidenceId || matchingEv?.evidence_id || proj.evidenceId || proj.id || itemId,
+                                  proj.title || "Project Item",
+                                  matchingEv?.selectionReason || matchingEv?.selection_reason,
+                                  matchingEv?.matchedSkills || matchingEv?.matched_skills,
+                                  {
+                                    sourceDocumentId: proj.sourceDocumentId || proj.source_document_id || null,
+                                    sourceDocumentName: proj.sourceDocumentName || proj.source_document_name || null,
+                                    sourceType: "project",
+                                    sourceItemId: proj.id || itemId,
+                                    title: proj.title || "Project Item",
+                                  }
+                                );
+                              }}
+                              className="h-6 px-1.5 text-[11px] text-muted hover:text-accent gap-1"
+                              title="Trace workspace evidence provenance"
+                            >
+                              <Search className="h-3 w-3" />
+                              <span>Provenance</span>
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openApplyModal("Project", itemId, highlights.length)}
+                              className="h-6 px-1.5 text-[11px] text-muted hover:text-primary gap-1"
+                              title="Add highlight"
+                            >
+                              <Plus className="h-3 w-3" />
+                              <span>Add Highlight</span>
+                            </Button>
+                          </div>
                         </div>
 
                         {proj.description && <p className="text-small text-secondary">{proj.description}</p>}
@@ -1643,6 +1824,8 @@ export default function TargetedResumeWorkspacePage() {
                           {selected.map((item, idx) => {
                             const matchedSkills = item.matchedSkills || item.matched_skills || [];
                             const score = Math.round((item.rankScore ?? item.rank_score ?? 0) * 100);
+                            const evidenceId = item.evidenceId || item.evidence_id || `evidence_${idx}`;
+                            const itemTitle = item.title || evidenceId;
                             return (
                               <Card key={idx} className="p-4 border-border shadow-subtle bg-surface space-y-2">
                                 <div className="flex items-start justify-between gap-2">
@@ -1652,11 +1835,11 @@ export default function TargetedResumeWorkspacePage() {
                                         {item.sourceType || item.source_type}
                                       </Badge>
                                       <strong className="text-small font-bold text-primary">
-                                        {item.title || item.evidenceId || item.evidence_id}
+                                        {itemTitle}
                                       </strong>
                                     </div>
                                     <span className="text-caption font-mono text-muted text-[11px] block">
-                                      {item.evidenceId || item.evidence_id}
+                                      {evidenceId}
                                     </span>
                                   </div>
                                   <div className="text-right shrink-0">
@@ -1673,16 +1856,42 @@ export default function TargetedResumeWorkspacePage() {
                                   </p>
                                 )}
 
-                                {matchedSkills.length > 0 && (
-                                  <div className="flex flex-wrap items-center gap-1 pt-1">
-                                    <span className="text-caption text-muted">Matched:</span>
-                                    {matchedSkills.map((sk, sIdx) => (
-                                      <Badge key={sIdx} variant="outline" className="text-[10px] bg-page text-primary py-0">
-                                        {sk}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                )}
+                                <div className="flex items-center justify-between pt-1 gap-2">
+                                  {matchedSkills.length > 0 ? (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <span className="text-caption text-muted">Matched:</span>
+                                      {matchedSkills.map((sk, sIdx) => (
+                                        <Badge key={sIdx} variant="outline" className="text-[10px] bg-page text-primary py-0">
+                                          {sk}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div />
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleOpenProvenance(
+                                        evidenceId,
+                                        itemTitle,
+                                        item.selectionReason || item.selection_reason,
+                                        matchedSkills,
+                                        {
+                                          sourceType: item.sourceType || item.source_type || "experience",
+                                          sourceItemId: item.sourceItemId || item.source_item_id || evidenceId,
+                                          title: itemTitle,
+                                        }
+                                      )
+                                    }
+                                    className="h-6 px-2 text-[11px] text-accent hover:text-accent-hover hover:bg-accent-soft gap-1 shrink-0 ml-auto"
+                                    title="Trace evidence source provenance"
+                                  >
+                                    <Search className="h-3 w-3" />
+                                    <span>Trace Provenance</span>
+                                  </Button>
+                                </div>
                               </Card>
                             );
                           })}
@@ -1712,6 +1921,8 @@ export default function TargetedResumeWorkspacePage() {
                         <div className="space-y-2.5">
                           {excluded.map((item, idx) => {
                             const score = Math.round((item.rankScore ?? item.rank_score ?? 0) * 100);
+                            const evidenceId = item.evidenceId || item.evidence_id || `excluded_${idx}`;
+                            const itemTitle = item.title || evidenceId;
                             return (
                               <Card key={idx} className="p-4 border-border shadow-subtle bg-surface space-y-2 opacity-85 hover:opacity-100 transition-opacity">
                                 <div className="flex items-start justify-between gap-2">
@@ -1721,11 +1932,11 @@ export default function TargetedResumeWorkspacePage() {
                                         {item.sourceType || item.source_type}
                                       </Badge>
                                       <span className="text-small font-semibold text-secondary">
-                                        {item.title || item.evidenceId || item.evidence_id}
+                                        {itemTitle}
                                       </span>
                                     </div>
                                     <span className="text-caption font-mono text-muted text-[11px] block">
-                                      {item.evidenceId || item.evidence_id}
+                                      {evidenceId}
                                     </span>
                                   </div>
                                   <div className="text-right shrink-0">
@@ -1741,6 +1952,31 @@ export default function TargetedResumeWorkspacePage() {
                                     {item.exclusionReason || item.exclusion_reason}
                                   </p>
                                 )}
+
+                                <div className="flex justify-end pt-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() =>
+                                      handleOpenProvenance(
+                                        evidenceId,
+                                        itemTitle,
+                                        item.exclusionReason || item.exclusion_reason,
+                                        [],
+                                        {
+                                          sourceType: item.sourceType || item.source_type || "experience",
+                                          sourceItemId: item.sourceItemId || item.source_item_id || evidenceId,
+                                          title: itemTitle,
+                                        }
+                                      )
+                                    }
+                                    className="h-6 px-2 text-[11px] text-muted hover:text-primary hover:bg-page gap-1"
+                                    title="Trace evidence source provenance"
+                                  >
+                                    <Search className="h-3 w-3" />
+                                    <span>Trace Provenance</span>
+                                  </Button>
+                                </div>
                               </Card>
                             );
                           })}
@@ -2560,6 +2796,196 @@ export default function TargetedResumeWorkspacePage() {
                 </div>
               </div>
             ) : null}
+          </div>
+        </Modal>
+      )}
+
+      {/* Evidence Provenance Modal */}
+      {isProvenanceModalOpen && (
+        <Modal
+          isOpen={isProvenanceModalOpen}
+          onClose={() => setIsProvenanceModalOpen(false)}
+          title="Evidence Provenance & Verification Audit"
+          description={provenanceItemTitle ? `Origin trace for "${provenanceItemTitle}"` : "Trace evidence source document and workspace origin"}
+          maxWidth="2xl"
+        >
+          <div className="space-y-5 py-1">
+            {isProvenanceLoading ? (
+              <LoadingState text="Tracing evidence provenance across workspace and source documents..." />
+            ) : provenanceError ? (
+              <div className="space-y-4">
+                <div className="p-4 rounded-card border border-border bg-page space-y-2">
+                  <div className="flex items-center gap-2 text-primary font-semibold">
+                    <Info className="h-4 w-4 text-accent" />
+                    <span>Historical / Direct Entry Notice</span>
+                  </div>
+                  <p className="text-small text-secondary leading-relaxed">
+                    {provenanceError.includes("not available") || provenanceError.includes("404")
+                      ? "Historical provenance metadata is not attached to this evidence item. It was either created prior to deep provenance tracking or entered directly in the candidate workspace."
+                      : provenanceError}
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-card border border-border/70 bg-surface space-y-2.5">
+                  <div className="flex items-center justify-between text-caption text-muted">
+                    <span>Evidence ID: <span className="font-mono text-primary font-semibold">{provenanceEvidenceId}</span></span>
+                    <Badge variant="outline" className="text-[10px]">Workspace Item</Badge>
+                  </div>
+                  {provenanceSelectionReason && (
+                    <div className="text-small text-secondary pt-1">
+                      <span className="font-semibold text-primary">Resume Selection Rationale: </span>
+                      {provenanceSelectionReason}
+                    </div>
+                  )}
+                  {provenanceMatchedSkills && provenanceMatchedSkills.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1 pt-1">
+                      <span className="text-caption text-muted">Matched Skills:</span>
+                      {provenanceMatchedSkills.map((sk, sIdx) => (
+                        <Badge key={sIdx} variant="secondary" className="text-[10px]">
+                          {sk}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : provenanceData ? (
+              <div className="space-y-5">
+                {/* Header & Verification Status */}
+                <div className="p-4 rounded-card border border-border bg-page space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="secondary" className="text-xs capitalize font-semibold">
+                          {provenanceData.sourceType ? provenanceData.sourceType.replace("_", " ") : "evidence"}
+                        </Badge>
+                        <strong className="text-body font-bold text-primary">
+                          {provenanceData.title}
+                        </strong>
+                      </div>
+                      <span className="text-caption font-mono text-muted text-[11px] block">
+                        Evidence ID: {provenanceData.evidenceId}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge
+                        variant={provenanceData.verificationStatus === "verified" ? "success" : "outline"}
+                        className="text-[11px] font-semibold"
+                      >
+                        {provenanceData.verificationStatus === "verified" ? "Verified Evidence" : provenanceData.verificationStatus || "Unverified"}
+                      </Badge>
+                      {provenanceData.confidence != null && (
+                        <Badge variant="outline" className="text-[11px] font-mono">
+                          {Math.round(provenanceData.confidence * 100)}% Conf
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Document Provenance Section */}
+                <div className="space-y-3">
+                  <h4 className="text-small font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+                    <FileText className="h-4 w-4 text-accent" />
+                    <span>Source Document & Ingestion Trace</span>
+                  </h4>
+
+                  {provenanceData.sourceDocumentName ? (
+                    <Card className="p-4 border-border bg-surface space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2">
+                            <FileCheck className="h-4 w-4 text-status-success" />
+                            <strong className="text-small font-bold text-primary">
+                              {provenanceData.sourceDocumentName}
+                            </strong>
+                          </div>
+                          {provenanceData.sourceDocumentId && (
+                            <span className="text-caption font-mono text-muted text-[11px] block">
+                              Doc ID: {provenanceData.sourceDocumentId}
+                            </span>
+                          )}
+                        </div>
+                        {provenanceData.ingestionDraftStatus && (
+                          <Badge variant="outline" className="text-[10px] uppercase">
+                            {provenanceData.ingestionDraftStatus}
+                          </Badge>
+                        )}
+                      </div>
+
+                      {provenanceData.fileUrl ? (
+                        <div className="pt-2 border-t border-border/60 flex items-center justify-between">
+                          <span className="text-caption text-muted">Original candidate upload</span>
+                          <a
+                            href={provenanceData.fileUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-semibold text-accent hover:underline"
+                          >
+                            <span>View Source Document</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        </div>
+                      ) : (
+                        <p className="text-caption text-muted italic pt-1">
+                          Original document link is not available.
+                        </p>
+                      )}
+                    </Card>
+                  ) : (
+                    <Card className="p-4 border-border/80 bg-surface space-y-2">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 text-status-success" />
+                        <strong className="text-small font-semibold text-primary">
+                          Manual Workspace Entry
+                        </strong>
+                      </div>
+                      <p className="text-small text-secondary leading-relaxed">
+                        This evidence item was entered and verified directly in your candidate workspace. No external PDF/Word upload was required.
+                      </p>
+                    </Card>
+                  )}
+                </div>
+
+                {/* Resume Strategy Rationale */}
+                {(provenanceSelectionReason || (provenanceMatchedSkills && provenanceMatchedSkills.length > 0)) && (
+                  <div className="space-y-2.5">
+                    <h4 className="text-small font-bold uppercase tracking-wider text-muted flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 text-accent" />
+                      <span>Resume Targeting Rationale</span>
+                    </h4>
+                    <div className="p-3.5 rounded-card border border-border bg-page space-y-2">
+                      {provenanceSelectionReason && (
+                        <p className="text-small text-secondary leading-relaxed">
+                          <span className="font-semibold text-primary">Strategic Selection: </span>
+                          {provenanceSelectionReason}
+                        </p>
+                      )}
+                      {provenanceMatchedSkills && provenanceMatchedSkills.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <span className="text-caption text-muted font-semibold">Matched Job Skills:</span>
+                          {provenanceMatchedSkills.map((sk, sIdx) => (
+                            <Badge key={sIdx} variant="outline" className="text-[10px] bg-surface text-primary">
+                              {sk}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            <div className="flex justify-end pt-3 border-t border-border">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsProvenanceModalOpen(false)}
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </Modal>
       )}
