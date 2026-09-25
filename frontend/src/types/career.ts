@@ -94,3 +94,121 @@ export interface AttestSkillResponse {
   };
   message: string;
 }
+
+export type MilestoneCategory =
+  | "TransferableBridge"
+  | "CoreFoundation"
+  | "VerifiableProject"
+  | "DomainCertification";
+
+export type MilestoneState =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "ARTIFACT_SUBMITTED"
+  | "VERIFIED_PROJECT"
+  | "ATTESTED";
+
+export type ArtifactType =
+  | "GitHubRepository"
+  | "DeploymentUrl"
+  | "TechnicalWriteup"
+  | "AttestationRecord";
+
+export interface TargetImportanceBreakdown {
+  mustHaveCount: number;
+  preferredCount: number;
+}
+
+export interface VerificationArtifact {
+  artifactId: string;
+  artifactType: ArtifactType;
+  url?: string;
+  repositoryBranch?: string;
+  checklistCompleted: string[];
+  submittedAt: string;
+  provenanceHash: string;
+}
+
+export interface VerificationArtifactInput {
+  artifactType?: ArtifactType;
+  url?: string;
+  repositoryBranch?: string;
+  checklistCompleted?: string[];
+}
+
+export interface RoadmapMilestone {
+  milestoneId: string;
+  orderIndex: number;
+  title: string;
+  category: MilestoneCategory;
+  requirementName: string;
+  importance: "MustHave" | "Preferred" | "Unspecified";
+  targetCapability: string;
+  prerequisiteEvidenceIds: string[];
+  prerequisiteMilestoneIds: string[];
+  sourceBridgeId?: string;
+  rationale: string;
+  estimatedWeeks: number;
+  learningPath?: ActionableLearningPath;
+  projectBlueprint?: ProjectBlueprint;
+  bridgeDetails?: TransferableSkillBridge;
+  state: MilestoneState;
+  verificationArtifact?: VerificationArtifact;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface RoadmapProvenance {
+  sourceVariantId?: string;
+  sourceAnalysisScore?: number;
+  generatedAt: string;
+  generatorVersion: string;
+  provenanceHash: string;
+}
+
+export interface RoadmapPlan {
+  roadmapId: string;
+  userId: string;
+  title: string;
+  targetRole: string;
+  targetCompany?: string;
+  targetLevel?: string;
+  sourceVariantId?: string;
+  version: number;
+  totalMilestones: number;
+  completedMilestones: number;
+  overallProgressPct: number;
+  estimatedTotalWeeks: number;
+  targetImportanceBreakdown: TargetImportanceBreakdown;
+  nextRecommendedMilestoneId?: string;
+  milestones: RoadmapMilestone[];
+  provenance?: RoadmapProvenance;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenerateRoadmapRequest {
+  variantId?: string;
+  targetRole?: string;
+  targetCompany?: string;
+  jobDescription?: string;
+}
+
+export interface UpdateMilestoneProgressRequest {
+  milestoneId: string;
+  targetState: MilestoneState;
+  expectedVersion: number;
+  artifact?: VerificationArtifactInput;
+  attestation?: CandidateAttestationRequest;
+}
+
+export interface ListRoadmapsResponse {
+  total: number;
+  roadmaps: RoadmapPlan[];
+}
+
+export interface DeleteRoadmapResponse {
+  success: boolean;
+  roadmapId: string;
+  message: string;
+}

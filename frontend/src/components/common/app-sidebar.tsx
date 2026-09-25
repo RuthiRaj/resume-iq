@@ -18,6 +18,7 @@ import {
   Settings,
   X,
   Plus,
+  Compass,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCareer } from "@/lib/store";
@@ -80,9 +81,10 @@ export function AppSidebar({ onCloseMobile }: AppSidebarProps) {
       ],
     },
     {
-      title: "Resume Intelligence",
+      title: "Career & Resume Intelligence",
       items: [
         { label: "Resume Analyzer", href: "/analyzer", icon: Zap, badge: "ATS" },
+        { label: "Career Roadmaps", href: "/career/roadmaps", icon: Compass },
       ],
     },
     {
