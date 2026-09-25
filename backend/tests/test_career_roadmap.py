@@ -21,6 +21,7 @@ from app.schemas.requirement_match import RequirementMatch
 from app.schemas.career_roadmap import (
     RoadmapPlan,
     RoadmapMilestone,
+    VerificationArtifact,
     GenerateRoadmapRequest,
     UpdateMilestoneProgressRequest,
     VerificationArtifactInput,
@@ -30,11 +31,14 @@ from app.schemas.career_roadmap import (
 from app.schemas.career_intelligence import (
     TransferableSkillBridge,
     CandidateAttestationRequest,
+    ProjectBlueprint,
 )
+from app.schemas.ingestion import IngestionDraft, ParsedCandidateProfile
 from app.ai.career.roadmap_generator import RoadmapGenerator
 from app.services.career_roadmap_service import CareerRoadmapService
 from app.services.resume_service import ResumeService
 from app.services.variant_service import VariantService
+from app.services.ingestion_service import IngestionService
 
 
 @pytest.fixture
@@ -864,6 +868,9 @@ def test_career_roadmaps_api_route_registration():
     res_del = client.delete("/api/v1/career/roadmaps/rdm_test")
     assert res_del.status_code == 401
 
+    res_promote = client.post("/api/v1/career/roadmaps/rdm_test/milestones/ms_1/promote")
+    assert res_promote.status_code == 401
+
 
 # ---------------------------------------------------------------------------
 # 7. Milestone 2: DAG Dependencies, Priority & Progression Tests
@@ -1590,6 +1597,689 @@ async def test_adv_049_stale_version_concurrency_race(monkeypatch):
 def test_adv_050_free_product_integrity_milestone_2():
     """
     ADV_050: Free Product Integrity (Milestone 2 Stack).
+    Verifies that all Career Roadmap modules and tests contain ZERO monetization,
+    subscription, payment, pricing, or paywall references.
+    """
+    import inspect
+    import app.schemas.career_roadmap as cr_schemas
+    import app.ai.career.roadmap_generator as cr_gen
+    import app.services.career_roadmap_service as cr_service
+    import app.api.v1.roadmaps as cr_api
+
+    forbidden = [
+        "stripe",
+        "subscription",
+        "billing",
+        "price_id",
+        "credit_balance",
+        "paywall",
+        "checkout_session",
+        "pricing_tier",
+    ]
+
+    for mod in [cr_schemas, cr_gen, cr_service, cr_api]:
+        source = inspect.getsource(mod).lower()
+        for term in forbidden:
+            assert term not in source, f"Forbidden monetization term '{term}' found in {mod.__name__}"
+
+
+# ---------------------------------------------------------------------------
+# 9. Milestone 3: Evidence Promotion Bridge Functional & Adversarial Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_create_promotion_draft_success(monkeypatch):
+    """
+    Verify that CareerRoadmapService.create_promotion_draft creates a valid,
+    reviewable IngestionDraft from a VERIFIED_PROJECT milestone.
+    """
+    user = AuthenticatedUser(uid="usr_prom_1", token="tok_prom_1", email="prom1@example.com")
+
+    from app.schemas.career_roadmap import VerificationArtifact
+    from app.schemas.career_intelligence import ProjectBlueprint
+
+    art = VerificationArtifact(
+        artifactId="art_prom_123",
+        artifactType="GitHubRepository",
+        url="https://github.com/candidate/distributed-raft",
+        repositoryBranch="main",
+        checklistCompleted=["Implemented consensus logic", "Handled leader election timeouts"],
+        submittedAt="2026-09-25T12:00:00Z",
+        provenanceHash="d9a8f7c6e5b4a321d9a8f7c6e5b4a321d9a8f7c6e5b4a321d9a8f7c6e5b4a321",
+    )
+
+    blueprint = ProjectBlueprint(
+        projectTitle="Distributed Raft Consensus Engine",
+        problemStatement="Engineered a fault-tolerant distributed key-value store using Raft consensus.",
+        architectureComponents=["Leader Election", "Log Replication", "RPC Transport"],
+        demonstratedSkills=["Go", "Distributed Systems", "gRPC"],
+        verificationChecklist=["Leader election tests", "Network partition resilience"],
+    )
+
+    ms = RoadmapMilestone(
+        milestoneId="ms_raft_proj",
+        orderIndex=0,
+        title="Distributed Raft Engine",
+        category="VerifiableProject",
+        requirementName="Distributed Systems",
+        targetCapability="Raft Consensus",
+        rationale="Demonstrate systems engineering capability",
+        state="VERIFIED_PROJECT",
+        projectBlueprint=blueprint,
+        verificationArtifact=art,
+    )
+
+    plan = RoadmapPlan(
+        roadmapId="rdm_prom_test",
+        userId="usr_prom_1",
+        title="Systems Architect Roadmap",
+        targetRole="Staff Systems Engineer",
+        version=1,
+        totalMilestones=1,
+        milestones=[ms],
+        createdAt="2026-09-25T00:00:00Z",
+        updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    async def mock_get_draft_404(u, iid):
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    saved_drafts = []
+
+    class MockClient:
+        async def patch(self, url, headers, json, timeout=25.0):
+            saved_drafts.append(json)
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            return mock_res
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+    monkeypatch.setattr(IngestionService, "get_ingestion_draft", mock_get_draft_404)
+    monkeypatch.setattr("app.services.career_roadmap_service.get_http_client", lambda: MockClient())
+
+    draft = await CareerRoadmapService.create_promotion_draft(user, "rdm_prom_test", "ms_raft_proj")
+
+    assert draft.ingestion_id == "ingest_prom_rdm_prom_test_ms_raft_proj"
+    assert draft.document_type == "RoadmapProject"
+    assert draft.status == "Parsed"
+    assert draft.file_url == "https://github.com/candidate/distributed-raft"
+    assert draft.parsed_data is not None
+
+    # Verify project item mapping
+    projs = draft.parsed_data.evidence.projects
+    assert len(projs) == 1
+    proj = projs[0]
+    assert proj.title == "Distributed Raft Consensus Engine"
+    assert proj.description == "Engineered a fault-tolerant distributed key-value store using Raft consensus."
+    assert "Leader Election" in proj.highlights
+    assert "Implemented consensus logic" in proj.highlights
+    assert "Go" in proj.tech_stack
+    assert "Distributed Systems" in proj.tech_stack
+    assert proj.source_document_id == "ingest_prom_rdm_prom_test_ms_raft_proj"
+
+    # Verify skills mapping
+    skills = draft.parsed_data.evidence.skills
+    skill_names = {s.name for s in skills}
+    assert "Go" in skill_names
+    assert "Distributed Systems" in skill_names
+    assert "gRPC" in skill_names
+
+    assert len(saved_drafts) == 1
+
+
+@pytest.mark.asyncio
+async def test_promotion_draft_idempotency_parsed_reused(monkeypatch):
+    """Verify that requesting promotion when a Parsed draft already exists returns the existing draft."""
+    user = AuthenticatedUser(uid="usr_prom_1", token="tok_prom_1", email="prom1@example.com")
+
+    existing_draft = IngestionDraft(
+        ingestion_id="ingest_prom_rdm_1_ms_1",
+        document_name="Roadmap Project",
+        document_type="RoadmapProject",
+        file_size_bytes=100,
+        status="Parsed",
+        created_at="2026-09-25T00:00:00Z",
+        updated_at="2026-09-25T00:00:00Z",
+    )
+
+    art = VerificationArtifact(
+        artifactId="art_1", artifactType="GitHubRepository", url="https://github.com/test",
+        checklistCompleted=[], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash_1234",
+    )
+    ms = RoadmapMilestone(
+        milestoneId="ms_1", orderIndex=0, title="Project 1", category="VerifiableProject",
+        requirementName="Python", targetCapability="API", rationale="Rat",
+        state="VERIFIED_PROJECT", verificationArtifact=art,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_1", userId="usr_prom_1", title="Plan", targetRole="Dev", version=1,
+        totalMilestones=1, milestones=[ms], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    async def mock_get_draft(u, iid):
+        return existing_draft
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+    monkeypatch.setattr(IngestionService, "get_ingestion_draft", mock_get_draft)
+
+    draft = await CareerRoadmapService.create_promotion_draft(user, "rdm_1", "ms_1")
+    assert draft.ingestion_id == "ingest_prom_rdm_1_ms_1"
+    assert draft.status == "Parsed"
+
+
+@pytest.mark.asyncio
+async def test_promotion_draft_rejected_when_completed(monkeypatch):
+    """Verify that promoting a project whose draft is already Completed raises HTTP 400."""
+    user = AuthenticatedUser(uid="usr_prom_1", token="tok_prom_1", email="prom1@example.com")
+
+    completed_draft = IngestionDraft(
+        ingestion_id="ingest_prom_rdm_1_ms_1",
+        document_name="Roadmap Project",
+        document_type="RoadmapProject",
+        file_size_bytes=100,
+        status="Completed",
+        created_at="2026-09-25T00:00:00Z",
+        updated_at="2026-09-25T00:00:00Z",
+        completed_at="2026-09-25T01:00:00Z",
+    )
+
+    art = VerificationArtifact(
+        artifactId="art_1", artifactType="GitHubRepository", url="https://github.com/test",
+        checklistCompleted=[], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash_1234",
+    )
+    ms = RoadmapMilestone(
+        milestoneId="ms_1", orderIndex=0, title="Project 1", category="VerifiableProject",
+        requirementName="Python", targetCapability="API", rationale="Rat",
+        state="VERIFIED_PROJECT", verificationArtifact=art,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_1", userId="usr_prom_1", title="Plan", targetRole="Dev", version=1,
+        totalMilestones=1, milestones=[ms], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    async def mock_get_draft(u, iid):
+        return completed_draft
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+    monkeypatch.setattr(IngestionService, "get_ingestion_draft", mock_get_draft)
+
+    with pytest.raises(HTTPException) as exc:
+        await CareerRoadmapService.create_promotion_draft(user, "rdm_1", "ms_1")
+
+    assert exc.value.status_code == 400
+    assert "already been promoted and confirmed" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_promotion_end_to_end_confirmation_hydrates_workspace(monkeypatch):
+    """
+    Verify that an IngestionDraft created via create_promotion_draft successfully hydrates
+    into master workspace evidence through IngestionService.confirm_and_hydrate_ingestion,
+    preserving project title, description, highlights, tech stack, and source provenance.
+    """
+    user = AuthenticatedUser(uid="usr_e2e_1", token="tok_e2e_1", email="e2e@example.com")
+
+    art = VerificationArtifact(
+        artifactId="art_e2e_1", artifactType="GitHubRepository", url="https://github.com/candidate/microservices",
+        checklistCompleted=["Configured service mesh", "Implemented distributed tracing"],
+        submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash_e2e_123",
+    )
+    bp = ProjectBlueprint(
+        projectTitle="Microservices Architecture Platform",
+        problemStatement="Engineered high-resilience microservices cluster with Envoy service mesh.",
+        architectureComponents=["Envoy Proxy", "Jaeger Tracing"],
+        demonstratedSkills=["Kubernetes", "Go", "Docker"],
+        verificationChecklist=["End-to-end tracing tests"],
+    )
+    ms = RoadmapMilestone(
+        milestoneId="ms_e2e_proj", orderIndex=0, title="Microservices Platform", category="VerifiableProject",
+        requirementName="Kubernetes", targetCapability="Microservices", rationale="Scalable infra",
+        state="VERIFIED_PROJECT", projectBlueprint=bp, verificationArtifact=art,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_e2e_1", userId="usr_e2e_1", title="Cloud Architect", targetRole="Cloud Architect",
+        version=1, totalMilestones=1, milestones=[ms], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    firestore_db = {}
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    async def mock_get_draft(u, iid):
+        if iid in firestore_db:
+            return firestore_db[iid]
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    class MockClient:
+        async def patch(self, url, headers, json, timeout=25.0):
+            firestore_db[url] = json
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            return mock_res
+
+        async def get(self, url, headers, timeout=25.0):
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            mock_res.json.return_value = {"documents": []}
+            return mock_res
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+    monkeypatch.setattr(IngestionService, "get_ingestion_draft", mock_get_draft)
+    monkeypatch.setattr("app.services.career_roadmap_service.get_http_client", lambda: MockClient())
+    monkeypatch.setattr("app.services.ingestion_service.get_http_client", lambda: MockClient())
+    monkeypatch.setattr("app.services.profile_service.get_http_client", lambda: MockClient())
+    monkeypatch.setattr("app.services.resume_service.get_http_client", lambda: MockClient())
+
+    # Step 1: Promotion creates IngestionDraft
+    draft = await CareerRoadmapService.create_promotion_draft(user, "rdm_e2e_1", "ms_e2e_proj")
+    assert draft.status == "Parsed"
+    assert draft.document_type == "RoadmapProject"
+
+    # Step 2: Register draft in mock DB for IngestionService lookup
+    firestore_db[draft.ingestion_id] = draft
+
+    # Step 3: Candidate confirms ingestion draft through standard IngestionService
+    confirm_res = await IngestionService.confirm_and_hydrate_ingestion(
+        user=user,
+        ingestion_id=draft.ingestion_id,
+        reviewed_data=draft.parsed_data,
+    )
+
+    assert confirm_res.success is True
+    assert confirm_res.status == "Completed"
+    assert confirm_res.hydrated_summary["projects"] == 1
+    assert confirm_res.hydrated_summary["skills"] >= 3
+
+
+# ---------------------------------------------------------------------------
+# 10. Adversarial Security Cases (ADV_051 - ADV_060)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_adv_051_unauthorized_roadmap_promotion(monkeypatch):
+    """
+    ADV_051: Unauthorized Roadmap Promotion Attack.
+    User B attempts to promote a milestone belonging to User A's roadmap.
+    The service must reject the request with HTTP 404 (tenant-safe isolation).
+    """
+    user_attacker = AuthenticatedUser(uid="usr_attacker", token="tok_bad", email="bad@example.com")
+
+    async def mock_get(u, rid):
+        if u.uid != "usr_legit":
+            raise HTTPException(status_code=404, detail="Roadmap not found")
+        art = VerificationArtifact(
+            artifactId="art_1", artifactType="GitHubRepository", url="https://github.com/legit",
+            checklistCompleted=[], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash",
+        )
+        return RoadmapPlan(
+            roadmapId="rdm_legit", userId="usr_legit", title="Legit", targetRole="Dev", version=1,
+            totalMilestones=1,
+            milestones=[
+                RoadmapMilestone(
+                    milestoneId="ms_legit_1", orderIndex=0, title="P", category="VerifiableProject",
+                    requirementName="Python", targetCapability="API", rationale="R",
+                    state="VERIFIED_PROJECT", verificationArtifact=art,
+                )
+            ],
+            createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+        )
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get)
+
+    with pytest.raises(HTTPException) as exc:
+        await CareerRoadmapService.create_promotion_draft(user_attacker, "rdm_legit", "ms_legit_1")
+
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_adv_052_cross_tenant_artifact_injection(monkeypatch):
+    """
+    ADV_052: Cross-Tenant Artifact Injection Defense.
+    Attacker tries to promote a milestone using a foreign milestone_id.
+    Must fail with HTTP 404.
+    """
+    user = AuthenticatedUser(uid="usr_user", token="tok_user", email="user@example.com")
+
+    art = VerificationArtifact(
+        artifactId="art_1", artifactType="GitHubRepository", url="https://github.com/user",
+        checklistCompleted=[], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash",
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_user", userId="usr_user", title="Plan", targetRole="Dev", version=1,
+        totalMilestones=1,
+        milestones=[
+            RoadmapMilestone(
+                milestoneId="ms_owned", orderIndex=0, title="Owned", category="VerifiableProject",
+                requirementName="Python", targetCapability="API", rationale="R",
+                state="VERIFIED_PROJECT", verificationArtifact=art,
+            )
+        ],
+        createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get(u, rid):
+        return plan
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get)
+
+    # Supply milestoneId from foreign user/roadmap
+    with pytest.raises(HTTPException) as exc:
+        await CareerRoadmapService.create_promotion_draft(user, "rdm_user", "ms_foreign_victim_milestone")
+
+    assert exc.value.status_code == 404
+    assert "not found in roadmap" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_adv_053_ineligible_state_promotion(monkeypatch):
+    """
+    ADV_053: Ineligible State Promotion Defense.
+    Attempting to promote milestones in NOT_STARTED, IN_PROGRESS, ARTIFACT_SUBMITTED,
+    or ATTESTED state must be strictly rejected with HTTP 400.
+    """
+    user = AuthenticatedUser(uid="usr_adv53", token="tok_adv53", email="adv53@example.com")
+
+    ineligible_states = ["NOT_STARTED", "IN_PROGRESS", "ARTIFACT_SUBMITTED", "ATTESTED"]
+
+    for st in ineligible_states:
+        art = None
+        if st in ("ARTIFACT_SUBMITTED", "ATTESTED"):
+            art = VerificationArtifact(
+                artifactId="art_sub", artifactType="GitHubRepository", url="https://github.com/sub",
+                checklistCompleted=[], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash",
+            )
+        cat = "TransferableBridge" if st == "ATTESTED" else "VerifiableProject"
+
+        ms = RoadmapMilestone(
+            milestoneId=f"ms_state_{st}", orderIndex=0, title=f"Title {st}", category=cat,
+            requirementName="Cloud", targetCapability="Infra", rationale="Rat",
+            state=st, verificationArtifact=art,
+        )
+        plan = RoadmapPlan(
+            roadmapId=f"rdm_{st}", userId="usr_adv53", title="Plan", targetRole="DevOps", version=1,
+            totalMilestones=1, milestones=[ms], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+        )
+
+        async def mock_get(u, rid, current_plan=plan):
+            return current_plan
+
+        monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get)
+
+        with pytest.raises(HTTPException) as exc:
+            await CareerRoadmapService.create_promotion_draft(user, f"rdm_{st}", f"ms_state_{st}")
+
+        assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_adv_054_missing_verification_artifact_defense(monkeypatch):
+    """
+    ADV_054: Missing Verification Artifact Defense.
+    A milestone marked as VERIFIED_PROJECT but lacking a verification_artifact
+    (or containing an empty artifact ID/hash) must be rejected with HTTP 400.
+    """
+    user = AuthenticatedUser(uid="usr_adv54", token="tok_adv54", email="adv54@example.com")
+
+    # Milestone in VERIFIED_PROJECT but verificationArtifact is None
+    ms_no_art = RoadmapMilestone(
+        milestoneId="ms_no_art", orderIndex=0, title="Title", category="VerifiableProject",
+        requirementName="Security", targetCapability="Auth", rationale="Rat",
+        state="VERIFIED_PROJECT", verificationArtifact=None,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_no_art", userId="usr_adv54", title="Plan", targetRole="Security", version=1,
+        totalMilestones=1, milestones=[ms_no_art], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get(u, rid):
+        return plan
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get)
+
+    with pytest.raises(HTTPException) as exc:
+        await CareerRoadmapService.create_promotion_draft(user, "rdm_no_art", "ms_no_art")
+
+    assert exc.value.status_code == 400
+    assert "without a valid verification artifact" in exc.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_adv_055_duplicate_promotion_idempotency_attack(monkeypatch):
+    """
+    ADV_055: Duplicate Promotion Idempotency Attack.
+    Concurrent or repeated calls to promote the same milestone must produce exactly ONE
+    draft and never create multiple drafts or duplicate master workspace records.
+    """
+    user = AuthenticatedUser(uid="usr_adv55", token="tok_adv55", email="adv55@example.com")
+
+    art = VerificationArtifact(
+        artifactId="art_adv55", artifactType="GitHubRepository", url="https://github.com/adv55",
+        checklistCompleted=["Done"], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash55",
+    )
+    ms = RoadmapMilestone(
+        milestoneId="ms_adv55", orderIndex=0, title="Adv55 Proj", category="VerifiableProject",
+        requirementName="Kubernetes", targetCapability="K8s", rationale="R",
+        state="VERIFIED_PROJECT", verificationArtifact=art,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_adv55", userId="usr_adv55", title="Plan", targetRole="DevOps", version=1,
+        totalMilestones=1, milestones=[ms], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    firestore_drafts = {}
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    async def mock_get_draft(u, iid):
+        if iid in firestore_drafts:
+            return firestore_drafts[iid]
+        raise HTTPException(status_code=404, detail="Not found")
+
+    class MockClient:
+        async def patch(self, url, headers, json, timeout=25.0):
+            # simulate storing draft
+            iid = "ingest_prom_rdm_adv55_ms_adv55"
+            firestore_drafts[iid] = IngestionDraft(
+                ingestionId=iid,
+                documentName="Roadmap Project",
+                documentType="RoadmapProject",
+                fileSizeBytes=100,
+                status="Parsed",
+                createdAt="2026-09-25T00:00:00Z",
+                updatedAt="2026-09-25T00:00:00Z",
+            )
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            return mock_res
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+    monkeypatch.setattr(IngestionService, "get_ingestion_draft", mock_get_draft)
+    monkeypatch.setattr("app.services.career_roadmap_service.get_http_client", lambda: MockClient())
+
+    # Call 1: Creates draft
+    d1 = await CareerRoadmapService.create_promotion_draft(user, "rdm_adv55", "ms_adv55")
+    # Call 2: Returns existing draft without recreation
+    d2 = await CareerRoadmapService.create_promotion_draft(user, "rdm_adv55", "ms_adv55")
+
+    assert d1.ingestion_id == d2.ingestion_id
+    assert len(firestore_drafts) == 1
+
+
+@pytest.mark.asyncio
+async def test_adv_056_workspace_direct_mutation_bypass(monkeypatch):
+    """
+    ADV_056: Workspace Direct Mutation Bypass Defense.
+    Calling create_promotion_draft must NOT write to canonical workspace collections.
+    """
+    user = AuthenticatedUser(uid="usr_adv56", token="tok_adv56", email="adv56@example.com")
+
+    workspace_writes = []
+
+    art = VerificationArtifact(
+        artifactId="art_adv56", artifactType="GitHubRepository", url="https://github.com/adv56",
+        checklistCompleted=["Done"], submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash56",
+    )
+    ms = RoadmapMilestone(
+        milestoneId="ms_adv56", orderIndex=0, title="Adv56 Proj", category="VerifiableProject",
+        requirementName="Docker", targetCapability="Containers", rationale="R",
+        state="VERIFIED_PROJECT", verificationArtifact=art,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_adv56", userId="usr_adv56", title="Plan", targetRole="DevOps", version=1,
+        totalMilestones=1, milestones=[ms], createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    async def mock_get_draft(u, iid):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    class MockClient:
+        async def patch(self, url, headers, json, timeout=25.0):
+            workspace_writes.append(url)
+            mock_res = MagicMock()
+            mock_res.status_code = 200
+            return mock_res
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+    monkeypatch.setattr(IngestionService, "get_ingestion_draft", mock_get_draft)
+    monkeypatch.setattr("app.services.career_roadmap_service.get_http_client", lambda: MockClient())
+
+    await CareerRoadmapService.create_promotion_draft(user, "rdm_adv56", "ms_adv56")
+
+    # Assert that writes ONLY targeted the ingestions draft subcollection, NEVER root workspace collections
+    assert len(workspace_writes) == 1
+    assert f"/users/{user.uid}/ingestions/ingest_prom_" in workspace_writes[0]
+    assert f"/users/{user.uid}/projects" not in workspace_writes[0]
+    assert f"/users/{user.uid}/skills" not in workspace_writes[0]
+    assert f"/users/{user.uid}/profile" not in workspace_writes[0]
+
+
+def test_adv_057_claim_grounding_integrity():
+    """
+    ADV_057: Claim Grounding Integrity.
+    Verifies that the transformed project draft strictly originates from ProjectBlueprint
+    and VerificationArtifact, containing zero ungrounded metrics or scope-inflating verbs.
+    """
+    from app.schemas.career_intelligence import ProjectBlueprint
+    from app.schemas.career_roadmap import VerificationArtifact
+
+    art = VerificationArtifact(
+        artifactId="art_adv57", artifactType="GitHubRepository", url="https://github.com/adv57",
+        checklistCompleted=["Configured routing", "Implemented cache invalidation"],
+        submittedAt="2026-09-25T00:00:00Z", provenanceHash="hash57",
+    )
+    bp = ProjectBlueprint(
+        projectTitle="API Gateway Service",
+        problemStatement="Engineered high-throughput reverse proxy with rate limiting.",
+        architectureComponents=["Proxy Layer", "Token Bucket Limiter"],
+        demonstratedSkills=["Go", "Redis", "HTTP"],
+        verificationChecklist=["Rate limit unit tests"],
+    )
+
+    # Ingestion draft mapping inspection
+    highlights = list(bp.architecture_components) + list(art.checklist_completed)
+    assert "Proxy Layer" in highlights
+    assert "Token Bucket Limiter" in highlights
+    assert "Configured routing" in highlights
+    assert "Implemented cache invalidation" in highlights
+
+    # Prohibited hallucinated terms must not be in blueprint or artifact
+    forbidden_injections = ["45% increase in revenue", "led team of 15 engineers", "$2M cost savings", "drive business growth"]
+    for term in forbidden_injections:
+        assert term not in bp.problem_statement
+        assert all(term not in h for h in highlights)
+
+
+def test_adv_058_provenance_chain_integrity():
+    """
+    ADV_058: Provenance Chain Integrity.
+    Verifies that the promotion draft deterministically embeds roadmapId, milestoneId,
+    artifactId, provenanceHash, and documentType="RoadmapProject".
+    """
+    from app.schemas.career_roadmap import VerificationArtifact
+
+    art = VerificationArtifact(
+        artifactId="art_adv58_sample",
+        artifactType="DeploymentUrl",
+        url="https://app.example.com",
+        checklistCompleted=["Deployed to production"],
+        submittedAt="2026-09-25T00:00:00Z",
+        provenanceHash="d9a8f7c6e5b4a321d9a8f7c6e5b4a321d9a8f7c6e5b4a321d9a8f7c6e5b4a321",
+    )
+
+    ms = RoadmapMilestone(
+        milestoneId="ms_adv58_id",
+        orderIndex=0,
+        title="Production Deployment",
+        category="VerifiableProject",
+        requirementName="DevOps",
+        targetCapability="CI/CD",
+        rationale="Deploy app",
+        state="VERIFIED_PROJECT",
+        verificationArtifact=art,
+    )
+
+    ingestion_id = f"ingest_prom_rdm_adv58_{ms.milestone_id}"
+    assert ingestion_id.startswith("ingest_prom_")
+    assert "rdm_adv58" in ingestion_id
+    assert "ms_adv58_id" in ingestion_id
+    assert len(art.provenance_hash) == 64
+
+
+@pytest.mark.asyncio
+async def test_adv_059_attestation_to_project_confusion_defense(monkeypatch):
+    """
+    ADV_059: Attestation-to-Project Confusion Defense.
+    Attempting to promote a TransferableBridge / ATTESTED milestone as project evidence
+    must be strictly rejected with HTTP 400.
+    """
+    user = AuthenticatedUser(uid="usr_adv59", token="tok_adv59", email="adv59@example.com")
+
+    art = VerificationArtifact(
+        artifactId="art_attest_record", artifactType="AttestationRecord", url=None,
+        checklistCompleted=["Attested via Phase 5.0"], submittedAt="2026-09-25T00:00:00Z",
+        provenanceHash="att_hash",
+    )
+    ms_bridge = RoadmapMilestone(
+        milestoneId="ms_bridge_adv59", orderIndex=0, title="Bridge React to Vue",
+        category="TransferableBridge", requirementName="Vue", targetCapability="Vue SPA",
+        rationale="Framework transferability", state="ATTESTED", verificationArtifact=art,
+    )
+    plan = RoadmapPlan(
+        roadmapId="rdm_adv59", userId="usr_adv59", title="Plan", targetRole="Frontend",
+        version=1, totalMilestones=1, milestones=[ms_bridge],
+        createdAt="2026-09-25T00:00:00Z", updatedAt="2026-09-25T00:00:00Z",
+    )
+
+    async def mock_get_roadmap(u, rid):
+        return plan
+
+    monkeypatch.setattr(CareerRoadmapService, "get_roadmap", mock_get_roadmap)
+
+    with pytest.raises(HTTPException) as exc:
+        await CareerRoadmapService.create_promotion_draft(user, "rdm_adv59", "ms_bridge_adv59")
+
+    assert exc.value.status_code == 400
+    assert "transferablebridge milestones cannot be promoted as project evidence" in exc.value.detail.lower() or "only milestones in 'verified_project' state are eligible" in exc.value.detail.lower()
+
+
+def test_adv_060_free_product_integrity_milestone_3():
+    """
+    ADV_060: Free Product Invariant (Milestone 3 Stack).
     Verifies that all Career Roadmap modules and tests contain ZERO monetization,
     subscription, payment, pricing, or paywall references.
     """

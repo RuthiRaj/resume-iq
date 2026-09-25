@@ -20,6 +20,7 @@ from app.schemas.career_roadmap import (
     ListRoadmapsResponse,
     DeleteRoadmapResponse,
 )
+from app.schemas.ingestion import IngestionDraft
 from app.services.career_roadmap_service import CareerRoadmapService
 from app.core.rate_limiter import ai_analysis_limiter, mutation_limiter
 
@@ -97,6 +98,29 @@ async def update_milestone_progress_endpoint(
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="Roadmap progress update timed out after 30 seconds. Please retry.",
+        )
+
+
+@router.post(
+    "/{roadmap_id}/milestones/{milestone_id}/promote",
+    response_model=IngestionDraft,
+    summary="Create a reviewable evidence ingestion draft from a verified roadmap project",
+)
+async def promote_milestone_project_endpoint(
+    roadmap_id: str,
+    milestone_id: str,
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> IngestionDraft:
+    await mutation_limiter.check(current_user.uid)
+    try:
+        return await asyncio.wait_for(
+            CareerRoadmapService.create_promotion_draft(current_user, roadmap_id, milestone_id),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Promotion draft creation timed out after 30 seconds. Please retry.",
         )
 
 

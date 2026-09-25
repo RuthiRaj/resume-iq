@@ -28,7 +28,9 @@ from app.schemas.career_roadmap import (
     MilestoneState,
 )
 from app.schemas.requirement_match import RequirementMatch
-from app.schemas.candidate import CandidateEvidence
+from app.schemas.candidate import CandidateEvidence, ProjectItem, SkillItem
+from app.schemas.profile import ProfileDTO
+from app.schemas.ingestion import IngestionDraft, ParsedCandidateProfile
 from app.services.resume_service import (
     ResumeService,
     get_http_client,
@@ -39,6 +41,7 @@ from app.services.resume_service import (
 )
 from app.services.variant_service import VariantService
 from app.services.career_intelligence_service import CareerIntelligenceService
+from app.services.ingestion_service import IngestionService
 from app.ai.career.roadmap_generator import RoadmapGenerator
 
 
@@ -405,6 +408,169 @@ class CareerRoadmapService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error deleting career roadmap: {str(e)}",
             )
+
+    @classmethod
+    async def create_promotion_draft(
+        cls,
+        user: AuthenticatedUser,
+        roadmap_id: str,
+        milestone_id: str,
+    ) -> IngestionDraft:
+        """
+        Synthesizes a reviewable IngestionDraft from a completed roadmap milestone:
+        1. Loads the roadmap strictly scoped under the authenticated user.
+        2. Validates milestone existence and eligibility (must be VERIFIED_PROJECT with valid artifact).
+        3. Rejects TransferableBridge / ATTESTED (which belong to Phase 5.0 attestation flow).
+        4. Deterministically constructs an IngestionDraft with ProjectItem and SkillItems.
+        5. Persists draft under users/{uid}/ingestions/{ingestion_id} with idempotency.
+        6. Leaves root workspace evidence collections 100% UNTOUCHED (until candidate confirms via ingestion flow).
+        """
+        _validate_safe_id(roadmap_id, "roadmap_id")
+        _validate_safe_id(milestone_id, "milestone_id")
+
+        roadmap = await cls.get_roadmap(user, roadmap_id)
+
+        target_ms: Optional[RoadmapMilestone] = None
+        for ms in roadmap.milestones:
+            if ms.milestone_id == milestone_id:
+                target_ms = ms
+                break
+
+        if not target_ms:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Milestone '{milestone_id}' not found in roadmap '{roadmap_id}'.",
+            )
+
+        # Eligibility Validation
+        if target_ms.state != "VERIFIED_PROJECT":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Milestone '{target_ms.title}' has state '{target_ms.state}'. Only milestones in 'VERIFIED_PROJECT' state are eligible for evidence promotion.",
+            )
+
+        if target_ms.category == "TransferableBridge":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="TransferableBridge milestones cannot be promoted as project evidence. Use the candidate attestation flow instead.",
+            )
+
+        if not target_ms.verification_artifact:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot promote milestone without a valid verification artifact.",
+            )
+
+        art = target_ms.verification_artifact
+        if not art.artifact_id or not art.provenance_hash:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Verification artifact is missing required identification or provenance hash.",
+            )
+
+        ingestion_id = f"ingest_prom_{roadmap_id}_{milestone_id}"
+
+        # Idempotency Check
+        try:
+            existing_draft = await IngestionService.get_ingestion_draft(user, ingestion_id)
+            if existing_draft.status == "Completed":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Milestone project has already been promoted and confirmed into workspace evidence.",
+                )
+            return existing_draft
+        except HTTPException as he:
+            if he.status_code == 400:
+                raise
+            # 404 means draft does not exist yet -> proceed to create
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Deterministic Field Mapping from ProjectBlueprint and VerificationArtifact
+        if target_ms.project_blueprint:
+            title = target_ms.project_blueprint.project_title or target_ms.title
+            description = target_ms.project_blueprint.problem_statement or target_ms.rationale
+            highlights = list(target_ms.project_blueprint.architecture_components) + list(art.checklist_completed)
+            tech_stack = list(target_ms.project_blueprint.demonstrated_skills)
+            if target_ms.requirement_name and target_ms.requirement_name not in tech_stack:
+                tech_stack.append(target_ms.requirement_name)
+        else:
+            title = target_ms.title
+            description = f"Project demonstrating {target_ms.target_capability}: {target_ms.rationale}"
+            highlights = list(art.checklist_completed)
+            tech_stack = [target_ms.requirement_name] if target_ms.requirement_name else []
+
+        doc_name = f"Roadmap: {roadmap.title} ({target_ms.title})"
+
+        proj_item = ProjectItem(
+            id=f"proj_{milestone_id[:12]}",
+            title=title,
+            role="Lead Developer",
+            description=description,
+            highlights=highlights,
+            techStack=tech_stack,
+            sourceDocumentId=ingestion_id,
+            sourceDocumentName=doc_name,
+            verificationStatus="verified",
+            confidence=1.0,
+        )
+
+        skill_items = [
+            SkillItem(
+                id=f"skill_prom_{uuid.uuid5(uuid.NAMESPACE_DNS, f'{ingestion_id}:{skill}').hex[:8]}",
+                name=skill,
+                category="Technical",
+                proficiency="Intermediate",
+                sourceDocumentId=ingestion_id,
+                sourceDocumentName=doc_name,
+                verificationStatus="verified",
+                confidence=1.0,
+            )
+            for skill in tech_stack
+        ]
+
+        parsed_data = ParsedCandidateProfile(
+            profile=ProfileDTO(),
+            evidence=CandidateEvidence(
+                projects=[proj_item],
+                skills=skill_items,
+            ),
+        )
+
+        raw_snippet = f"Milestone: {target_ms.title}\nArtifact ID: {art.artifact_id}\nArtifact Type: {art.artifact_type}\nProvenance Hash: {art.provenance_hash}"
+
+        draft = IngestionDraft(
+            ingestion_id=ingestion_id,
+            document_name=doc_name,
+            document_type="RoadmapProject",
+            file_size_bytes=len(description.encode("utf-8")),
+            status="Parsed",
+            raw_text_snippet=raw_snippet,
+            raw_text_char_count=len(raw_snippet),
+            parsed_data=parsed_data,
+            error_message=None,
+            file_url=art.url,
+            created_at=now_iso,
+            updated_at=now_iso,
+            completed_at=None,
+        )
+
+        # Persist draft in Firestore under users/{uid}/ingestions/{ingestion_id}
+        doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/ingestions/{ingestion_id}"
+        headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
+        client = get_http_client()
+
+        payload_dict = draft.model_dump(by_alias=True)
+        fields_body = {"fields": _encode_firestore_fields(payload_dict)}
+
+        res = await client.patch(doc_url, headers=headers, json=fields_body, timeout=25.0)
+        if res.status_code not in (200, 201):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to persist promotion draft in Firestore (status {res.status_code}).",
+            )
+
+        return draft
 
     @classmethod
     async def _save_roadmap_doc(
