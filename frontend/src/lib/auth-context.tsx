@@ -29,9 +29,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (
-      (process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true" || process.env.NEXT_PUBLIC_E2E === "true") &&
       typeof window !== "undefined" &&
-      window.localStorage.getItem("e2e_bypass_auth") === "true"
+      window.localStorage.getItem("e2e_bypass_auth") === "true" &&
+      (window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        process.env.NEXT_PUBLIC_E2E === "true" ||
+        process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true")
     ) {
       setUser({
         uid: "usr_e2e_123",

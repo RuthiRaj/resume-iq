@@ -84,9 +84,9 @@ export default function CareerRoadmapDetailPage() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const fetchRoadmap = useCallback(async () => {
+  const fetchRoadmap = useCallback(async (quiet = false) => {
     if (!user || !roadmapId) return;
-    setIsLoading(true);
+    if (!quiet) setIsLoading(true);
     setErrorMessage(null);
 
     try {
@@ -96,7 +96,7 @@ export default function CareerRoadmapDetailPage() {
     } catch (err: any) {
       setErrorMessage(err.message || "Failed to load roadmap details.");
     } finally {
-      setIsLoading(false);
+      if (!quiet) setIsLoading(false);
     }
   }, [user, roadmapId]);
 
@@ -490,7 +490,7 @@ export default function CareerRoadmapDetailPage() {
           draft={reviewDraft.draft}
           milestoneTitle={reviewDraft.milestoneTitle}
           onConfirmSuccess={() => {
-            fetchRoadmap();
+            fetchRoadmap(true);
           }}
         />
       )}

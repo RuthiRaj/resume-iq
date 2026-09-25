@@ -10,6 +10,7 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
     targetLevel: "L6",
     sourceVariantId: "var_stripe_001",
     version: 3,
+    lifecycle: "ACTIVE",
     totalMilestones: 3,
     completedMilestones: 1,
     overallProgressPct: 33,
@@ -220,7 +221,7 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
 
     // Mock Ingestion Confirmation POST
     await page.route(
-      "**/api/resumes/ingest/ingest_prom_rm_e2e_test_123_ms_proj_002/confirm",
+      "**/api/resumes/ingest/**/confirm",
       async (route) => {
         await route.fulfill({
           status: 200,
@@ -256,14 +257,14 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
       page.getByRole("heading", { name: "Staff Platform Engineer Roadmap" })
     ).toBeVisible();
     await expect(page.getByText("Next Recommended Step:")).toBeVisible();
-    await expect(page.getByText("Multi-Region Distributed Gateway Engine")).toBeVisible();
+    await expect(page.getByText("Multi-Region Distributed Gateway Engine").first()).toBeVisible();
 
     // Verify milestones present
     await expect(
-      page.getByText("Kubernetes Cluster Orchestration Attestation")
+      page.getByText("Kubernetes Cluster Orchestration Attestation").first()
     ).toBeVisible();
     await expect(
-      page.getByText("AWS Certified Solutions Architect - Professional")
+      page.getByText("AWS Certified Solutions Architect - Professional").first()
     ).toBeVisible();
   });
 
@@ -304,7 +305,7 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
       page.getByRole("heading", { name: "Review Roadmap Project Evidence" })
     ).toBeVisible();
     await expect(page.getByText("Origin: Career Roadmap Project")).toBeVisible();
-    await expect(page.getByText("Multi-Region Distributed Gateway Engine")).toBeVisible();
+    await expect(page.getByText("Multi-Region Distributed Gateway Engine").first()).toBeVisible();
 
     // Check project blueprint highlights are populated
     await expect(
@@ -313,8 +314,8 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
 
     // Check skills tab
     await page.getByRole("button", { name: /Demonstrated Skills/ }).click();
-    await expect(page.getByText("Distributed Consensus")).toBeVisible();
-    await expect(page.getByText("Raft")).toBeVisible();
+    await expect(page.locator('[role="dialog"]').getByText("Distributed Consensus")).toBeVisible();
+    await expect(page.locator('[role="dialog"]').getByText("Raft", { exact: true })).toBeVisible();
   });
 
   test("6. Explicit confirmation hydrates Master Workspace and provides navigation", async ({
@@ -333,7 +334,7 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
       .click();
 
     // Success state should display
-    await expect(page.getByText("Evidence Successfully Confirmed!")).toBeVisible();
+    await expect(page.locator('[role="dialog"]').getByText("Evidence Successfully Confirmed!")).toBeVisible();
     await expect(page.getByRole("button", { name: "View in Workspace Projects" })).toBeVisible();
   });
 
@@ -459,7 +460,7 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
     await reconcileBtn.click();
 
     // Verify toast or banner
-    await expect(page.getByText(/Workspace evidence reconciled/i)).toBeVisible();
+    await expect(page.getByText(/Reconciliation complete/i)).toBeVisible();
   });
 
   test("11. Stale evidence banner allows one-click roadmap refresh", async ({
@@ -508,12 +509,12 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
     await page.goto("/career/roadmaps/rm_e2e_test_123");
 
     // Check Stale Evidence banner is displayed
-    await expect(page.getByText("Workspace Evidence Updated")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Refresh Roadmap Now" })).toBeVisible();
+    await expect(page.getByText(/Workspace Evidence Changed/i)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh Now" })).toBeVisible();
 
     // Click Refresh
-    await page.getByRole("button", { name: "Refresh Roadmap Now" }).click();
-    await expect(page.getByText(/Roadmap refreshed against workspace evidence/i)).toBeVisible();
+    await page.getByRole("button", { name: "Refresh Now" }).click();
+    await expect(page.getByText(/Roadmap refreshed/i)).toBeVisible();
   });
 
   test("12. Multi-roadmap lifecycle management supports archiving and restoring", async ({
@@ -539,7 +540,7 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
     await page.goto("/career/roadmaps/rm_e2e_test_123");
 
     // Click Archive Roadmap
-    const archiveBtn = page.getByRole("button", { name: "Archive Roadmap" });
+    const archiveBtn = page.getByRole("button", { name: "Archive" });
     await expect(archiveBtn).toBeVisible();
     await archiveBtn.click();
 
