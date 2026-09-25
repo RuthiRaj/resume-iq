@@ -35,9 +35,22 @@ from app.evaluation.llm_boundary import (
     OfflineMockEvaluationProvider,
 )
 from app.evaluation.runner import EvaluationRunner, run_and_print_summary
+from app.evaluation.dataset.adversarial_cases import (
+    AdversarialCase,
+    AdversarialCategory,
+    get_adversarial_cases,
+    DATASET_VERSION as ADVERSARIAL_DATASET_VERSION,
+)
+from app.evaluation.adversarial_evaluator import (
+    AdversarialResult,
+    AdversarialSuiteReport,
+    evaluate_adversarial_case,
+    run_adversarial_suite,
+)
 
 __all__ = [
     "DATASET_VERSION",
+    "ADVERSARIAL_DATASET_VERSION",
     "EvaluationCase",
     "EvaluationResult",
     "EvaluationSuiteReport",
@@ -57,4 +70,11 @@ __all__ = [
     "OfflineMockEvaluationProvider",
     "EvaluationRunner",
     "run_and_print_summary",
+    "AdversarialCase",
+    "AdversarialCategory",
+    "get_adversarial_cases",
+    "AdversarialResult",
+    "AdversarialSuiteReport",
+    "evaluate_adversarial_case",
+    "run_adversarial_suite",
 ]
