@@ -1,5 +1,5 @@
 """
-Evaluation Suite Runner for ResumeIQ Phase 4.0.2
+Evaluation Suite Runner for ResumeIQ Phase 4.0.4
 
 Orchestrates execution of benchmark cases, collects structured results,
 computes category metrics, and outputs formatted evaluation reports.
@@ -41,7 +41,7 @@ class EvaluationRunner:
 
         return EvaluationSuiteReport(
             datasetVersion=DATASET_VERSION,
-            evaluatorVersion="4.0.3",
+            evaluatorVersion="4.0.4",
             totalCases=total,
             passedCases=passed,
             failedCases=failed,
@@ -71,6 +71,28 @@ class EvaluationRunner:
             lines.append(
                 f"  [{cat_name.upper():<12}] Total: {summary.total_cases:<3} | Passed: {summary.passed_cases:<3} | Failed: {summary.failed_cases:<3} | Pass Rate: {summary.pass_rate * 100:.1f}%"
             )
+            # Print detailed IR metrics for retrieval category
+            if cat_name == "retrieval" and summary.aggregated_metrics:
+                m = summary.aggregated_metrics
+                p1 = m.get("avg_p_at_1", 0.0)
+                p3 = m.get("avg_p_at_3", 0.0)
+                p5 = m.get("avg_p_at_5", 0.0)
+                r1 = m.get("avg_r_at_1", 0.0)
+                r3 = m.get("avg_r_at_3", 0.0)
+                r5 = m.get("avg_r_at_5", 0.0)
+                mrr = m.get("avg_mrr", 0.0)
+                ndcg1 = m.get("avg_ndcg_at_1", 0.0)
+                ndcg3 = m.get("avg_ndcg_at_3", 0.0)
+                ndcg5 = m.get("avg_ndcg_at_5", 0.0)
+                lines.append(
+                    f"      IR Precision: P@1: {p1:.3f} | P@3: {p3:.3f} | P@5: {p5:.3f}"
+                )
+                lines.append(
+                    f"      IR Recall:    R@1: {r1:.3f} | R@3: {r3:.3f} | R@5: {r5:.3f}"
+                )
+                lines.append(
+                    f"      IR Ranking:   MRR: {mrr:.3f} | nDCG@1: {ndcg1:.3f} | nDCG@3: {ndcg3:.3f} | nDCG@5: {ndcg5:.3f}"
+                )
 
         if report.failed_cases > 0:
             lines.extend(["-" * 60, "Failures:"])

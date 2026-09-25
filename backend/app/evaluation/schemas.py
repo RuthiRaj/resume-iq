@@ -60,6 +60,11 @@ class EvaluationCase(BaseModel):
         alias="expectedEvidence",
         description="Evidence item IDs or titles that MUST be retrieved/selected",
     )
+    expected_graded_relevance: Optional[Dict[str, int]] = Field(
+        default=None,
+        alias="expectedGradedRelevance",
+        description="Mapping of evidence item ID to expected graded relevance level (0=Irrelevant, 1=Peripheral, 2=Supporting, 3=Core/Exact)",
+    )
     expected_non_matches: List[str] = Field(
         default_factory=list,
         alias="expectedNonMatches",
@@ -145,8 +150,8 @@ class EvaluationSuiteReport(BaseModel):
     Complete benchmark evaluation run report.
     Fully versioned and reproducible.
     """
-    dataset_version: str = Field(default="4.0.3", alias="datasetVersion")
-    evaluator_version: str = Field(default="4.0.3", alias="evaluatorVersion")
+    dataset_version: str = Field(default="4.0.4", alias="datasetVersion")
+    evaluator_version: str = Field(default="4.0.4", alias="evaluatorVersion")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 8601 UTC timestamp of evaluation run",

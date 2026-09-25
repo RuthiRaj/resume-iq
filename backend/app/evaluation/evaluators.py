@@ -29,6 +29,12 @@ from app.ai.claim_validator import (
     validate_summary_grounding,
 )
 from app.evaluation.schemas import EvaluationCase, EvaluationResult
+from app.evaluation.metrics import (
+    calculate_precision_at_k,
+    calculate_recall_at_k,
+    calculate_mrr,
+    calculate_ndcg_at_k,
+)
 
 
 def evaluate_retrieval_case(case: EvaluationCase) -> EvaluationResult:
@@ -95,25 +101,29 @@ def evaluate_retrieval_case(case: EvaluationCase) -> EvaluationResult:
         query_text=jd_text,
         must_have_skills=must_have,
         candidate_items=evidence_items,
-        top_k=5,
+        top_k=max(5, len(evidence_items)),
     ))
     retrieved_ids = [r.evidence_id for r in retrieved]
     actual["retrievedIds"] = retrieved_ids
+    actual["retrievedRanked"] = [
+        {"evidenceId": r.evidence_id, "score": r.fused_score, "itemTitle": r.evidence_item.title if r.evidence_item else ""}
+        for r in retrieved
+    ]
 
-    # Check Expected Evidence Retrieval
+    # Check Expected Evidence Retrieval (Hit Rate)
     hits = 0
     for exp_id in case.expected_evidence:
-        if exp_id in retrieved_ids or any(exp_id.lower() in (r.evidence_item.title.lower() if r.evidence_item else "") for r in retrieved):
+        if exp_id in retrieved_ids or any(exp_id.lower() in (r.evidence_item.title.lower() if r.evidence_item else "") for r in retrieved[:5]):
             hits += 1
         else:
-            failures.append(f"Expected evidence '{exp_id}' was not retrieved in top-{len(retrieved_ids)} results.")
+            failures.append(f"Expected evidence '{exp_id}' was not retrieved in top-5 results.")
     metrics["hit_rate"] = hits / len(case.expected_evidence) if case.expected_evidence else 1.0
 
     # Check Expected Non-Matches
     false_positives = 0
     for non_match in case.expected_non_matches:
         nm_lower = non_match.lower()
-        for r in retrieved:
+        for r in retrieved[:5]:
             item_title = r.evidence_item.title.lower() if r.evidence_item else ""
             if nm_lower in r.evidence_id.lower() or nm_lower in item_title:
                 failures.append(f"Disallowed evidence/tech '{non_match}' was retrieved in candidate: {r.evidence_id}")
@@ -124,6 +134,64 @@ def evaluate_retrieval_case(case: EvaluationCase) -> EvaluationResult:
             false_positives += 1
 
     metrics["false_positive_count"] = float(false_positives)
+
+    # 5. Compute Graded Relevance Mapping & IR Metrics (P@K, R@K, MRR, nDCG@K)
+    resolved_graded_rel: Dict[str, int] = {}
+    if case.expected_graded_relevance:
+        for k_item, v_rel in case.expected_graded_relevance.items():
+            resolved_graded_rel[k_item] = v_rel
+            resolved_graded_rel[k_item.lower()] = v_rel
+    else:
+        for exp in case.expected_evidence:
+            resolved_graded_rel[exp] = 3
+            resolved_graded_rel[exp.lower()] = 3
+        for nm in case.expected_non_matches:
+            resolved_graded_rel[nm] = 0
+            resolved_graded_rel[nm.lower()] = 0
+
+    item_id_to_rel: Dict[str, int] = {}
+    for item in evidence_items:
+        rel = 0
+        if item.evidence_id in resolved_graded_rel:
+            rel = max(rel, resolved_graded_rel[item.evidence_id])
+        if item.title and item.title.lower() in resolved_graded_rel:
+            rel = max(rel, resolved_graded_rel[item.title.lower()])
+        if item.role and item.role.lower() in resolved_graded_rel:
+            rel = max(rel, resolved_graded_rel[item.role.lower()])
+        if item.source_item_id and item.source_item_id in resolved_graded_rel:
+            rel = max(rel, resolved_graded_rel[item.source_item_id])
+        if item.source_type == "profile":
+            hl = (case.workspace_fixture.headline or "").lower()
+            if hl in resolved_graded_rel:
+                rel = max(rel, resolved_graded_rel[hl])
+            if "profile_main" in resolved_graded_rel:
+                rel = max(rel, resolved_graded_rel["profile_main"])
+        item_id_to_rel[item.evidence_id] = rel
+
+    p_at_1 = calculate_precision_at_k(retrieved_ids, item_id_to_rel, k=1, relevance_threshold=2)
+    p_at_3 = calculate_precision_at_k(retrieved_ids, item_id_to_rel, k=3, relevance_threshold=2)
+    p_at_5 = calculate_precision_at_k(retrieved_ids, item_id_to_rel, k=5, relevance_threshold=2)
+
+    r_at_1 = calculate_recall_at_k(retrieved_ids, item_id_to_rel, k=1, relevance_threshold=2)
+    r_at_3 = calculate_recall_at_k(retrieved_ids, item_id_to_rel, k=3, relevance_threshold=2)
+    r_at_5 = calculate_recall_at_k(retrieved_ids, item_id_to_rel, k=5, relevance_threshold=2)
+
+    mrr = calculate_mrr(retrieved_ids, item_id_to_rel, relevance_threshold=2)
+
+    ndcg_at_1 = calculate_ndcg_at_k(retrieved_ids, item_id_to_rel, k=1)
+    ndcg_at_3 = calculate_ndcg_at_k(retrieved_ids, item_id_to_rel, k=3)
+    ndcg_at_5 = calculate_ndcg_at_k(retrieved_ids, item_id_to_rel, k=5)
+
+    metrics["p_at_1"] = p_at_1
+    metrics["p_at_3"] = p_at_3
+    metrics["p_at_5"] = p_at_5
+    metrics["r_at_1"] = r_at_1
+    metrics["r_at_3"] = r_at_3
+    metrics["r_at_5"] = r_at_5
+    metrics["mrr"] = mrr
+    metrics["ndcg_at_1"] = ndcg_at_1
+    metrics["ndcg_at_3"] = ndcg_at_3
+    metrics["ndcg_at_5"] = ndcg_at_5
 
     passed = len(failures) == 0
     score = 1.0 if passed else max(0.0, 1.0 - (len(failures) * 0.25))
@@ -138,6 +206,7 @@ def evaluate_retrieval_case(case: EvaluationCase) -> EvaluationResult:
             "matchClasses": case.expected_match_classes,
             "expectedEvidence": case.expected_evidence,
             "expectedNonMatches": case.expected_non_matches,
+            "expectedGradedRelevance": case.expected_graded_relevance,
         },
         actual=actual,
         failures=failures,

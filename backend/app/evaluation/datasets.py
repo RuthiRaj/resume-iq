@@ -1,8 +1,9 @@
 """
-Synthetic Golden Evaluation Dataset for ResumeIQ Phase 4.0.3
+Synthetic Golden Evaluation Dataset for ResumeIQ Phase 4.0.4
 
-Contains 35 deterministic, synthetic evaluation benchmark cases covering:
-- Retrieval: Exact match, semantic match, non-equivalent technologies, ranking, missing items
+Contains 45 deterministic, synthetic evaluation benchmark cases covering:
+- Retrieval: Exact match, semantic match, non-equivalent technologies, ranking, missing items,
+  graded relevance ranking, multi-evidence queries, distractor rejection, recency/metrics, tie-breaking
 - Grounding: Quantified achievements, unsupported metrics, unsupported technologies, unsupported leadership,
   duration validation, credential hallucination, company/title hallucination, business outcomes,
   provenance preservation, AI inference boundaries, and workspace immutability
@@ -10,7 +11,7 @@ Contains 35 deterministic, synthetic evaluation benchmark cases covering:
 - Security: Prompt injection in workspace, prompt injection in JD, multi-tenant isolation, unverified drafts
 - Determinism: Consistency of repeated runs
 
-DATASET_VERSION = "4.0.3"
+DATASET_VERSION = "4.0.4"
 100% Synthetic — Contains zero real personal identifiable information.
 """
 
@@ -27,11 +28,11 @@ from app.schemas.candidate import (
 from app.evaluation.schemas import EvaluationCase
 
 
-DATASET_VERSION = "4.0.3"
+DATASET_VERSION = "4.0.4"
 
 
 def get_golden_cases() -> List[EvaluationCase]:
-    """Returns the full list of 18 authoritative Phase 4.0.2 benchmark cases."""
+    """Returns the full list of authoritative Phase 4.0.4 benchmark cases."""
     return [
         # =========================================================================
         # RETRIEVAL CASES (CASE_001 - CASE_005, CASE_013, CASE_018)
@@ -1409,5 +1410,579 @@ def get_golden_cases() -> List[EvaluationCase]:
             },
             expectedNonMatches=["Designed distributed microservices architecture", "multiple cloud regions"],
             evaluationTags=["grounding", "ai_inference_boundary", "negative_constraint"],
+        ),
+
+        # =========================================================================
+        # PHASE 4.0.4 RETRIEVAL & RANKING EVALUATION CASES (CASE_036 - CASE_045)
+        # =========================================================================
+        EvaluationCase(
+            caseId="CASE_036",
+            description="Graded Ranking Quality: Distinguishes Exact (3) > Supporting (2) > Peripheral (1) > Irrelevant (0) evidence.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Senior Python & Distributed Systems Engineer",
+                summary="Experienced backend engineer specializing in high-throughput Python microservices and distributed data processing.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="Senior Backend Engineer",
+                        company="Nexus Cloud",
+                        start_date="2022",
+                        end_date="Present",
+                        bullets=["Engineered high-throughput asynchronous microservices in Python using FastAPI and Kafka."],
+                        technologies=["Python", "FastAPI", "Kafka"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Frontend Developer",
+                        company="PixelCraft",
+                        start_date="2020",
+                        end_date="2022",
+                        bullets=["Built client-facing web dashboards using React and JavaScript."],
+                        technologies=["React", "JavaScript"],
+                    ),
+                    ExperienceItem(
+                        id="exp_2",
+                        role="Marketing Coordinator",
+                        company="Global Brand Agency",
+                        start_date="2018",
+                        end_date="2020",
+                        bullets=["Managed email marketing campaigns and coordinated client outreach schedules."],
+                        technologies=[],
+                    ),
+                ],
+                projects=[
+                    ProjectItem(
+                        id="proj_0",
+                        title="DataStream ETL",
+                        description="Built Python ETL pipeline for distributed stream processing with Redis caching.",
+                        tech_stack=["Python", "Redis", "ETL"],
+                    )
+                ],
+                skills=[
+                    SkillItem(name="Python", category="Language", proficiency="Expert"),
+                    SkillItem(name="FastAPI", category="Framework", proficiency="Expert"),
+                    SkillItem(name="Kafka", category="Infrastructure", proficiency="Advanced"),
+                    SkillItem(name="React", category="Framework", proficiency="Intermediate"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Senior Python Backend Engineer",
+                "mustHaveSkills": ["Python", "FastAPI"],
+                "jobDescription": "Build scalable backend microservices and RESTful APIs using Python, FastAPI, and message queues.",
+            },
+            expectedEvidence=["ev_exp_0", "Python"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_proj_0": 2,
+                "ev_exp_1": 1,
+                "ev_exp_2": 0,
+                "Python": 3,
+                "FastAPI": 3,
+                "Kafka": 2,
+                "React": 1,
+                "profile_main": 3,
+                "Senior Python & Distributed Systems Engineer": 3,
+            },
+            expectedNonMatches=["ev_exp_2", "marketing"],
+            expectedMatchClasses={"Python": "direct_match", "FastAPI": "direct_match"},
+            evaluationTags=["retrieval", "ranking", "graded_relevance", "ndcg_quality"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_037",
+            description="Multi-Evidence Retrieval: Successfully retrieves multiple genuine relevant items across backend and database engineering.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Full Stack Data & Platform Engineer",
+                summary="Specialist in distributed backend services and relational database optimization.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="Backend Engineer",
+                        company="FinTech Core",
+                        start_date="2022",
+                        end_date="Present",
+                        bullets=["Developed core transaction processing services using Python and FastAPI."],
+                        technologies=["Python", "FastAPI"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Database Specialist",
+                        company="DataScale Inc",
+                        start_date="2020",
+                        end_date="2022",
+                        bullets=["Optimized PostgreSQL database queries and designed high-availability schema replication."],
+                        technologies=["PostgreSQL", "SQL"],
+                    ),
+                    ExperienceItem(
+                        id="exp_2",
+                        role="Graphic Designer",
+                        company="ArtStudio",
+                        start_date="2018",
+                        end_date="2020",
+                        bullets=["Designed brand illustrations and marketing vector assets using Illustrator."],
+                        technologies=["Illustrator"],
+                    ),
+                ],
+                projects=[
+                    ProjectItem(
+                        id="proj_0",
+                        title="QueryAnalyzer",
+                        description="Automated Python tool for profiling slow database queries.",
+                        tech_stack=["Python", "PostgreSQL"],
+                    )
+                ],
+                skills=[
+                    SkillItem(name="Python", category="Language", proficiency="Expert"),
+                    SkillItem(name="FastAPI", category="Framework", proficiency="Expert"),
+                    SkillItem(name="PostgreSQL", category="Database", proficiency="Expert"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Backend & Database Engineer",
+                "mustHaveSkills": ["Python", "FastAPI", "PostgreSQL"],
+                "jobDescription": "We need an engineer experienced in Python FastAPI development and PostgreSQL query optimization.",
+            },
+            expectedEvidence=["ev_exp_0", "ev_exp_1"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_exp_1": 3,
+                "ev_proj_0": 2,
+                "ev_exp_2": 0,
+                "Python": 3,
+                "FastAPI": 3,
+                "PostgreSQL": 3,
+            },
+            expectedNonMatches=["ev_exp_2", "Illustrator"],
+            expectedMatchClasses={"Python": "direct_match", "FastAPI": "direct_match", "PostgreSQL": "direct_match"},
+            evaluationTags=["retrieval", "multi_evidence", "precision_recall"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_038",
+            description="Hard Keyword Distractor Rejection: Distinguishes Java backend development from JavaScript and Java coffee shop project.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Enterprise Java Engineer",
+                summary="Enterprise backend engineer with 6 years experience in Java Spring Boot applications.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="Java Backend Engineer",
+                        company="Enterprise Solutions",
+                        start_date="2021",
+                        end_date="Present",
+                        bullets=["Architected enterprise microservices in Java using Spring Boot and Hibernate."],
+                        technologies=["Java", "Spring Boot", "Hibernate"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Web Developer",
+                        company="WebAgency",
+                        start_date="2019",
+                        end_date="2021",
+                        bullets=["Built client websites using JavaScript and CSS animations."],
+                        technologies=["JavaScript", "CSS"],
+                    ),
+                ],
+                projects=[
+                    ProjectItem(
+                        id="proj_0",
+                        title="Java Coffee Inventory Tracker",
+                        description="Python-based inventory tracking script written for local Java House coffee shop.",
+                        tech_stack=["Python", "Flask"],
+                    )
+                ],
+                skills=[
+                    SkillItem(name="Java", category="Language", proficiency="Expert"),
+                    SkillItem(name="Spring Boot", category="Framework", proficiency="Expert"),
+                    SkillItem(name="JavaScript", category="Language", proficiency="Intermediate"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Senior Java Backend Engineer",
+                "mustHaveSkills": ["Java", "Spring Boot"],
+                "jobDescription": "Develop resilient backend microservices using Java and the Spring Boot framework.",
+            },
+            expectedEvidence=["ev_exp_0", "Java"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_exp_1": 0,
+                "ev_proj_0": 0,
+                "Java": 3,
+                "Spring Boot": 3,
+                "JavaScript": 0,
+            },
+            expectedNonMatches=["JavaScript", "coffee shop"],
+            expectedMatchClasses={"Java": "direct_match", "Spring Boot": "direct_match"},
+            evaluationTags=["retrieval", "distractor_rejection", "ranking"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_039",
+            description="Technology Boundary Non-Equivalence (React vs Angular/Vue): Verifies that Angular or Vue cannot satisfy React requirement as direct match.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Frontend Web Developer",
+                summary="Experienced web developer with broad frontend framework experience.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="React Frontend Developer",
+                        company="TechNova",
+                        start_date="2022",
+                        end_date="Present",
+                        bullets=["Developed interactive single page applications using React and TypeScript."],
+                        technologies=["React", "TypeScript"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Angular Developer",
+                        company="LegacyApps",
+                        start_date="2020",
+                        end_date="2022",
+                        bullets=["Maintained enterprise Angular dashboards using RxJS and TypeScript."],
+                        technologies=["Angular", "TypeScript"],
+                    ),
+                    ExperienceItem(
+                        id="exp_2",
+                        role="Vue Developer",
+                        company="ShopFront",
+                        start_date="2018",
+                        end_date="2020",
+                        bullets=["Built e-commerce user interfaces using Vue.js and Pinia."],
+                        technologies=["Vue", "JavaScript"],
+                    ),
+                ],
+                skills=[
+                    SkillItem(name="React", category="Framework", proficiency="Expert"),
+                    SkillItem(name="Angular", category="Framework", proficiency="Advanced"),
+                    SkillItem(name="Vue", category="Framework", proficiency="Intermediate"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "React Specialist",
+                "mustHaveSkills": ["React"],
+                "jobDescription": "We are seeking a React specialist to architect our core component library.",
+            },
+            expectedEvidence=["ev_exp_0", "React"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_exp_1": 1,
+                "ev_exp_2": 1,
+                "React": 3,
+                "Angular": 1,
+                "Vue": 1,
+            },
+            expectedMatchClasses={"React": "direct_match"},
+            evaluationTags=["retrieval", "technology_boundary", "non_equivalence"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_040",
+            description="Technology Boundary Non-Equivalence (Docker vs Kubernetes/Terraform): Verifies containerization boundary semantics.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="DevOps & Infrastructure Engineer",
+                summary="Infrastructure specialist focused on container packaging and cluster automation.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="DevOps Specialist",
+                        company="CloudPeak",
+                        start_date="2022",
+                        end_date="Present",
+                        bullets=["Created optimized multi-stage Docker container images and Docker Compose environments."],
+                        technologies=["Docker", "Docker Compose"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Kubernetes Administrator",
+                        company="KubeScale",
+                        start_date="2020",
+                        end_date="2022",
+                        bullets=["Managed production Kubernetes clusters and authored Helm charts."],
+                        technologies=["Kubernetes", "Helm"],
+                    ),
+                    ExperienceItem(
+                        id="exp_2",
+                        role="Infrastructure Engineer",
+                        company="TerraCloud",
+                        start_date="2018",
+                        end_date="2020",
+                        bullets=["Provisioned cloud infrastructure using Terraform modules."],
+                        technologies=["Terraform", "AWS"],
+                    ),
+                ],
+                skills=[
+                    SkillItem(name="Docker", category="DevOps", proficiency="Expert"),
+                    SkillItem(name="Kubernetes", category="DevOps", proficiency="Advanced"),
+                    SkillItem(name="Terraform", category="Infrastructure", proficiency="Intermediate"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Docker Packaging Specialist",
+                "mustHaveSkills": ["Docker"],
+                "jobDescription": "Package backend services into lightweight, secure Docker containers.",
+            },
+            expectedEvidence=["ev_exp_0", "Docker"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_exp_1": 2,
+                "ev_exp_2": 1,
+                "Docker": 3,
+                "Kubernetes": 2,
+                "Terraform": 1,
+            },
+            expectedMatchClasses={"Docker": "direct_match"},
+            evaluationTags=["retrieval", "technology_boundary", "docker_k8s"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_041",
+            description="Recency & Metric-Strength Ranking: Ranks recent verified achievement higher than older unquantified role.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Cloud Performance Engineer",
+                summary="AWS infrastructure specialist with demonstrated track record of latency and cost optimization.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="Senior Cloud Architect",
+                        company="ScaleWave",
+                        start_date="2023",
+                        end_date="Present",
+                        bullets=["Optimized AWS cloud infrastructure, reducing API latency by 45% and annual compute cost by $120,000."],
+                        technologies=["AWS", "Terraform", "CloudWatch"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Junior Systems Admin",
+                        company="OldHost Co",
+                        start_date="2017",
+                        end_date="2018",
+                        bullets=["Assisted in basic setup of AWS EC2 instances and user accounts."],
+                        technologies=["AWS"],
+                    ),
+                    ExperienceItem(
+                        id="exp_2",
+                        role="Office Support",
+                        company="LocalServices",
+                        start_date="2015",
+                        end_date="2016",
+                        bullets=["Configured office printers and local area networking."],
+                        technologies=[],
+                    ),
+                ],
+                skills=[
+                    SkillItem(name="AWS", category="Cloud", proficiency="Expert"),
+                    SkillItem(name="Terraform", category="Infrastructure", proficiency="Advanced"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Cloud Performance Engineer",
+                "mustHaveSkills": ["AWS"],
+                "jobDescription": "Optimize cloud workloads on AWS to achieve high performance and low operational cost.",
+            },
+            expectedEvidence=["ev_exp_0", "AWS"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_exp_1": 2,
+                "ev_exp_2": 0,
+                "AWS": 3,
+                "Terraform": 2,
+                "profile_main": 3,
+                "Cloud Performance Engineer": 3,
+            },
+            expectedNonMatches=["ev_exp_2", "printers"],
+            expectedMatchClasses={"AWS": "direct_match"},
+            evaluationTags=["retrieval", "ranking", "recency_metrics"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_042",
+            description="Deterministic Tie-Breaking: Verifies deterministic ordering for equally scored items via (-score, evidence_id).",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Python Developer",
+                summary="Python developer with multiple equivalent tool projects.",
+                projects=[
+                    ProjectItem(
+                        id="proj_alpha",
+                        title="Alpha CLI",
+                        description="Command-line utility tool written in Python.",
+                        tech_stack=["Python"],
+                    ),
+                    ProjectItem(
+                        id="proj_beta",
+                        title="Beta CLI",
+                        description="Command-line utility tool written in Python.",
+                        tech_stack=["Python"],
+                    ),
+                ],
+                skills=[
+                    SkillItem(name="Python", category="Language", proficiency="Intermediate"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Python CLI Developer",
+                "mustHaveSkills": ["Python"],
+                "jobDescription": "Develop command-line tools and utilities in Python.",
+            },
+            expectedEvidence=["Python"],
+            expectedGradedRelevance={
+                "ev_proj_alpha": 3,
+                "ev_proj_beta": 3,
+                "Python": 3,
+            },
+            expectedMatchClasses={"Python": "direct_match"},
+            evaluationTags=["retrieval", "tie_breaking", "determinism"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_043",
+            description="Missing Core Requirement / Unverified Fallback: Verifies candidate lacking Rust requirement correctly flags missing gap.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Systems Programmer",
+                summary="Low-level systems developer with expertise in C++ and Python.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="C++ Systems Engineer",
+                        company="CoreEngine",
+                        start_date="2021",
+                        end_date="Present",
+                        bullets=["Developed high-throughput network engine in C++."],
+                        technologies=["C++", "Networking"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Python Scripting Developer",
+                        company="ToolWorks",
+                        start_date="2019",
+                        end_date="2021",
+                        bullets=["Automated system testing with Python scripts."],
+                        technologies=["Python"],
+                    ),
+                ],
+                skills=[
+                    SkillItem(name="C++", category="Language", proficiency="Expert"),
+                    SkillItem(name="Python", category="Language", proficiency="Advanced"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Rust Systems Engineer",
+                "mustHaveSkills": ["Rust"],
+                "jobDescription": "Architect memory-safe concurrent systems services using Rust.",
+            },
+            expectedEvidence=[],
+            expectedGradedRelevance={
+                "ev_exp_0": 1,
+                "ev_exp_1": 0,
+                "C++": 1,
+                "Python": 0,
+            },
+            expectedNonMatches=["Rust"],
+            expectedMatchClasses={"Rust": "related_but_unverified"},
+            evaluationTags=["retrieval", "missing_requirement", "abstention"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_044",
+            description="Multi-Role Cross-Experience Retrieval: Retrieves evidence spanning separate career roles to cover full-stack requirements.",
+            taskType="retrieval",
+            workspaceFixture=CandidateEvidence(
+                headline="Full Stack Software Engineer",
+                summary="Full stack engineer with specialized experience across frontend and backend roles.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_0",
+                        role="Frontend Lead",
+                        company="AlphaFrontend",
+                        start_date="2022",
+                        end_date="Present",
+                        bullets=["Engineered rich web applications with React and TypeScript."],
+                        technologies=["React", "TypeScript"],
+                    ),
+                    ExperienceItem(
+                        id="exp_1",
+                        role="Backend Lead",
+                        company="BetaBackend",
+                        start_date="2020",
+                        end_date="2022",
+                        bullets=["Engineered RESTful microservices in Python with FastAPI and PostgreSQL."],
+                        technologies=["FastAPI", "Python", "PostgreSQL"],
+                    ),
+                    ExperienceItem(
+                        id="exp_2",
+                        role="Content Assistant",
+                        company="LegacyMedia",
+                        start_date="2018",
+                        end_date="2020",
+                        bullets=["Formatted blog posts and uploaded media assets."],
+                        technologies=[],
+                    ),
+                ],
+                skills=[
+                    SkillItem(name="React", category="Framework", proficiency="Expert"),
+                    SkillItem(name="FastAPI", category="Framework", proficiency="Expert"),
+                    SkillItem(name="PostgreSQL", category="Database", proficiency="Advanced"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Senior Full Stack Engineer",
+                "mustHaveSkills": ["React", "FastAPI", "PostgreSQL"],
+                "jobDescription": "Design full-stack web applications spanning React frontend and FastAPI/PostgreSQL backend.",
+            },
+            expectedEvidence=["ev_exp_0", "ev_exp_1"],
+            expectedGradedRelevance={
+                "ev_exp_0": 3,
+                "ev_exp_1": 3,
+                "ev_exp_2": 0,
+            },
+            expectedNonMatches=["ev_exp_2"],
+            expectedMatchClasses={
+                "React": "direct_match",
+                "FastAPI": "direct_match",
+                "PostgreSQL": "direct_match",
+            },
+            evaluationTags=["retrieval", "multi_role", "cross_experience"],
+        ),
+
+        EvaluationCase(
+            caseId="CASE_045",
+            description="Tenant-Isolated Retrieval: Proves evaluating user cannot retrieve candidate evidence belonging to another tenant.",
+            taskType="security",
+            workspaceFixture=CandidateEvidence(
+                headline="Proprietary Rust Engineer",
+                summary="Confidential candidate workspace containing proprietary Rust engine development.",
+                experience=[
+                    ExperienceItem(
+                        id="exp_secret_0",
+                        role="Confidential Rust Architect",
+                        company="Stealth Systems",
+                        start_date="2022",
+                        end_date="Present",
+                        bullets=["Engineered proprietary zero-allocation memory engine in Rust."],
+                        technologies=["Rust", "Systems"],
+                    )
+                ],
+                skills=[
+                    SkillItem(name="Rust", category="Language", proficiency="Expert"),
+                ],
+            ),
+            jobDescriptionFixture={
+                "targetRole": "Rust Systems Architect",
+                "mustHaveSkills": ["Rust"],
+                "jobDescription": "Architect confidential high-performance Rust services.",
+            },
+            authContext={
+                "resourceOwnerUid": "user_alice_404",
+                "evaluatingUid": "user_bob_404",
+            },
+            expectedNonMatches=["exp_secret_0", "Stealth Systems"],
+            evaluationTags=["security", "tenant_isolation", "regression"],
         ),
     ]
