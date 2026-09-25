@@ -15,11 +15,11 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["."]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+addopts = "-p pytest_asyncio"
 
 [tool.ruff]
 line-length = 100
