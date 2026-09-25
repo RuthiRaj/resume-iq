@@ -1,15 +1,22 @@
 """
-Deterministic Roadmap Generator for Career Intelligence (Phase 5.1)
+Deterministic Roadmap Generator for Career Intelligence (Phase 5.1 — Milestone 2)
 
 Synthesizes structured, capability-grounded career roadmaps from candidate evidence,
 transferable skill bridges, and gap remediation blueprints.
 Operates completely deterministically with 0 LLM calls and 0 network requests.
+
+Milestone 2 additions:
+- Explicit DAG milestone dependency linking
+- O(V+E) topological DAG cycle validation
+- Time and priority aggregation (MustHave vs Preferred)
+- Next recommended actionable milestone computation
 """
 
 import uuid
+import json
 import hashlib
 from datetime import datetime, timezone
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict
 
 from app.schemas.candidate import CandidateEvidence
 from app.schemas.requirement_match import RequirementMatch
@@ -21,6 +28,7 @@ from app.schemas.career_roadmap import (
     RoadmapPlan,
     RoadmapMilestone,
     RoadmapProvenance,
+    TargetImportanceBreakdown,
     MilestoneCategory,
 )
 from app.ai.skills import normalize_skill_name
@@ -31,9 +39,83 @@ from app.ai.career.remediation_blueprints import GapRemediationEngine
 class RoadmapGenerator:
     """
     Deterministic Career Roadmap Generator.
-    Generates actionable, step-by-step milestones to bridge verified candidate skills
+    Generates actionable, step-by-step milestone DAGs to bridge verified candidate skills
     to target job requirements.
     """
+
+    @classmethod
+    def validate_milestone_dag(cls, milestones: List[RoadmapMilestone]) -> None:
+        """
+        Validates that the milestone dependency graph is topologically sound:
+        - No duplicate milestone IDs
+        - All prerequisite_milestone_ids exist in the roadmap
+        - No self-dependencies
+        - No duplicate prerequisite IDs
+        - Strictly acyclic (DAG check via 3-color DFS)
+        """
+        seen_ids: Set[str] = set()
+        for m in milestones:
+            if m.milestone_id in seen_ids:
+                raise ValueError(f"Duplicate milestone ID '{m.milestone_id}' detected in roadmap.")
+            seen_ids.add(m.milestone_id)
+
+        ms_ids = set(seen_ids)
+        adj: Dict[str, List[str]] = {m.milestone_id: [] for m in milestones}
+
+        for m in milestones:
+            # Check duplicate prerequisite IDs
+            if len(m.prerequisite_milestone_ids) != len(set(m.prerequisite_milestone_ids)):
+                raise ValueError(f"Milestone '{m.milestone_id}' contains duplicate prerequisite IDs.")
+
+            # Check self dependency and membership
+            for prereq_id in m.prerequisite_milestone_ids:
+                if prereq_id == m.milestone_id:
+                    raise ValueError(f"Milestone '{m.milestone_id}' cannot depend on itself.")
+                if prereq_id not in ms_ids:
+                    raise ValueError(f"Milestone '{m.milestone_id}' references non-existent prerequisite '{prereq_id}'.")
+                adj[prereq_id].append(m.milestone_id)
+
+        # Cycle check (0 = unvisited, 1 = visiting, 2 = visited)
+        state: Dict[str, int] = {m_id: 0 for m_id in ms_ids}
+
+        def dfs(node: str) -> None:
+            state[node] = 1  # visiting
+            for neighbor in adj.get(node, []):
+                if state[neighbor] == 1:
+                    raise ValueError(f"Circular dependency detected involving milestone '{neighbor}'.")
+                if state[neighbor] == 0:
+                    dfs(neighbor)
+            state[node] = 2  # visited
+
+        for m_id in ms_ids:
+            if state[m_id] == 0:
+                dfs(m_id)
+
+    @classmethod
+    def calculate_next_recommended_milestone_id(cls, milestones: List[RoadmapMilestone]) -> Optional[str]:
+        """
+        Determines the next unblocked actionable milestone:
+        - Milestone is not completed (state not in ('VERIFIED_PROJECT', 'ATTESTED'))
+        - All prerequisite milestones are completed (state in ('VERIFIED_PROJECT', 'ATTESTED'))
+        - Returns the earliest unblocked milestone by order_index
+        """
+        ms_map = {m.milestone_id: m for m in milestones}
+        completed_states = {"VERIFIED_PROJECT", "ATTESTED"}
+
+        for m in sorted(milestones, key=lambda x: x.order_index):
+            if m.state in completed_states:
+                continue
+            # Check if all prerequisites are satisfied
+            prereqs_satisfied = True
+            for prereq_id in m.prerequisite_milestone_ids:
+                prereq = ms_map.get(prereq_id)
+                if not prereq or prereq.state not in completed_states:
+                    prereqs_satisfied = False
+                    break
+            if prereqs_satisfied:
+                return m.milestone_id
+
+        return None
 
     @classmethod
     def generate_roadmap(
@@ -49,7 +131,7 @@ class RoadmapGenerator:
         source_analysis_score: Optional[int] = None,
     ) -> RoadmapPlan:
         """
-        Synthesizes a structured RoadmapPlan.
+        Synthesizes a structured, DAG-grounded RoadmapPlan.
         Milestone sequencing:
         1. Transferable Bridges (immediate leverage of existing verified foundation)
         2. Core Foundations (learning paths for missing hard skills)
@@ -58,7 +140,13 @@ class RoadmapGenerator:
         now_iso = datetime.now(timezone.utc).isoformat()
         roadmap_id = f"rdm_{uuid.uuid4().hex[:12]}"
 
-        # 1. Discover bridges and remediations if not provided
+        # 1. Index requirement importance
+        importance_map: Dict[str, str] = {}
+        for req in (missing_requirements or []):
+            norm = normalize_skill_name(req.requirement_name).lower()
+            importance_map[norm] = req.importance or "MustHave"
+
+        # 2. Discover bridges and remediations if not provided
         if transferable_bridges is None or remediation_strategies is None:
             missing = missing_requirements or []
             if transferable_bridges is None:
@@ -79,23 +167,31 @@ class RoadmapGenerator:
 
         milestones: List[RoadmapMilestone] = []
         seen_milestone_keys: Set[str] = set()
+        milestone_index: Dict[str, str] = {}  # key: f"{norm_req}_{category}" -> milestone_id
         order_idx = 0
 
         # Category 1: Transferable Bridges (Highest leverage / immediate impact)
         for bridge in transferable_bridges:
-            key = f"bridge_{normalize_skill_name(bridge.required_skill).lower()}"
+            req_norm = normalize_skill_name(bridge.required_skill).lower()
+            key = f"bridge_{req_norm}"
             if key in seen_milestone_keys:
                 continue
             seen_milestone_keys.add(key)
 
+            ms_id = f"ms_{uuid.uuid4().hex[:8]}"
+            imp_val = importance_map.get(req_norm, "MustHave")
+            valid_imp = imp_val if imp_val in ("MustHave", "Preferred", "Unspecified") else "MustHave"
+
             ms = RoadmapMilestone(
-                milestoneId=f"ms_{uuid.uuid4().hex[:8]}",
+                milestoneId=ms_id,
                 orderIndex=order_idx,
                 title=f"Bridge {bridge.candidate_skill} to {bridge.required_skill}",
                 category="TransferableBridge",
                 requirementName=bridge.required_skill,
+                importance=valid_imp,  # type: ignore
                 targetCapability=f"Demonstrate {bridge.required_skill} proficiency building on verified {bridge.candidate_skill} experience",
                 prerequisiteEvidenceIds=[bridge.source_evidence_id] if bridge.source_evidence_id else [],
+                prerequisiteMilestoneIds=[],  # Bridges build directly on candidate evidence
                 sourceBridgeId=bridge.bridge_id,
                 rationale=bridge.transfer_rationale,
                 estimatedWeeks=1,
@@ -103,32 +199,46 @@ class RoadmapGenerator:
                 state="NOT_STARTED",
             )
             milestones.append(ms)
+            milestone_index[f"{req_norm}_TransferableBridge"] = ms_id
             order_idx += 1
 
         # Category 2 & 3: Hard Gap Remediations
         for strat in remediation_strategies:
             req_norm = normalize_skill_name(strat.requirement_name).lower()
+            imp_val = importance_map.get(req_norm, "MustHave")
+            valid_imp = imp_val if imp_val in ("MustHave", "Preferred", "Unspecified") else "MustHave"
 
             # 2a. Core Foundation (Learning Path)
+            learn_ms_id: Optional[str] = None
             if strat.learning_paths:
                 lp = strat.learning_paths[0]
                 lp_key = f"learn_{req_norm}"
                 if lp_key not in seen_milestone_keys:
                     seen_milestone_keys.add(lp_key)
+                    learn_ms_id = f"ms_{uuid.uuid4().hex[:8]}"
+
+                    # If a bridge exists for this skill, depend on it; otherwise no prerequisite
+                    prereqs = []
+                    if f"{req_norm}_TransferableBridge" in milestone_index:
+                        prereqs.append(milestone_index[f"{req_norm}_TransferableBridge"])
+
                     ms_learn = RoadmapMilestone(
-                        milestoneId=f"ms_{uuid.uuid4().hex[:8]}",
+                        milestoneId=learn_ms_id,
                         orderIndex=order_idx,
                         title=f"Learn Core Fundamentals: {strat.requirement_name}",
                         category="CoreFoundation",
                         requirementName=strat.requirement_name,
+                        importance=valid_imp,  # type: ignore
                         targetCapability=lp.title,
                         prerequisiteEvidenceIds=[],
+                        prerequisiteMilestoneIds=prereqs,
                         rationale=strat.remediation_guidance,
                         estimatedWeeks=lp.estimated_weeks or 2,
                         learningPath=lp,
                         state="NOT_STARTED",
                     )
                     milestones.append(ms_learn)
+                    milestone_index[f"{req_norm}_CoreFoundation"] = learn_ms_id
                     order_idx += 1
 
             # 2b. Verifiable Project Blueprint
@@ -137,23 +247,49 @@ class RoadmapGenerator:
                 pb_key = f"proj_{req_norm}"
                 if pb_key not in seen_milestone_keys:
                     seen_milestone_keys.add(pb_key)
+                    proj_ms_id = f"ms_{uuid.uuid4().hex[:8]}"
+
+                    # Project depends on CoreFoundation learning if present, or Bridge if present
+                    proj_prereqs = []
+                    if f"{req_norm}_CoreFoundation" in milestone_index:
+                        proj_prereqs.append(milestone_index[f"{req_norm}_CoreFoundation"])
+                    elif f"{req_norm}_TransferableBridge" in milestone_index:
+                        proj_prereqs.append(milestone_index[f"{req_norm}_TransferableBridge"])
+
                     ms_proj = RoadmapMilestone(
-                        milestoneId=f"ms_{uuid.uuid4().hex[:8]}",
+                        milestoneId=proj_ms_id,
                         orderIndex=order_idx,
                         title=f"Build Verifiable Project: {pb.project_title}",
                         category="VerifiableProject",
                         requirementName=strat.requirement_name,
+                        importance=valid_imp,  # type: ignore
                         targetCapability=pb.project_title,
                         prerequisiteEvidenceIds=[],
+                        prerequisiteMilestoneIds=proj_prereqs,
                         rationale=f"Construct verifiable portfolio proof for '{strat.requirement_name}': {pb.problem_statement}",
                         estimatedWeeks=2,
                         projectBlueprint=pb,
                         state="NOT_STARTED",
                     )
                     milestones.append(ms_proj)
+                    milestone_index[f"{req_norm}_VerifiableProject"] = proj_ms_id
                     order_idx += 1
 
-        # Calculate Deterministic Provenance Hash from canonical generation inputs
+        # 3. Validate DAG Integrity (fails closed if cycle or invalid reference detected)
+        cls.validate_milestone_dag(milestones)
+
+        # 4. Compute Aggregate Metrics
+        total_weeks = sum(m.estimated_weeks for m in milestones)
+        must_have_count = sum(1 for m in milestones if m.importance == "MustHave")
+        preferred_count = sum(1 for m in milestones if m.importance == "Preferred")
+        importance_breakdown = TargetImportanceBreakdown(
+            mustHaveCount=must_have_count,
+            preferredCount=preferred_count,
+        )
+
+        next_rec_id = cls.calculate_next_recommended_milestone_id(milestones)
+
+        # 5. Calculate Deterministic Provenance Hash from canonical generation inputs
         # Must NOT depend on timestamps, random UUIDs, or runtime metadata
         canonical_input = {
             "generator_version": "5.1.0",
@@ -166,14 +302,19 @@ class RoadmapGenerator:
                 {
                     "category": m.category,
                     "requirement_name": m.requirement_name.strip().lower(),
+                    "importance": m.importance,
                     "target_capability": m.target_capability.strip(),
                     "prerequisite_evidence_ids": sorted(m.prerequisite_evidence_ids),
+                    "prerequisite_milestone_indices": [
+                        next(i for i, other in enumerate(milestones) if other.milestone_id == pid)
+                        for pid in m.prerequisite_milestone_ids
+                    ],
                     "source_bridge_id": m.source_bridge_id or "",
+                    "estimated_weeks": m.estimated_weeks,
                 }
                 for m in milestones
             ],
         }
-        import json
         canonical_serialized = json.dumps(canonical_input, sort_keys=True, separators=(",", ":"))
         prov_hash = hashlib.sha256(canonical_serialized.encode("utf-8")).hexdigest()
 
@@ -199,6 +340,9 @@ class RoadmapGenerator:
             totalMilestones=len(milestones),
             completedMilestones=0,
             overallProgressPct=0,
+            estimatedTotalWeeks=total_weeks,
+            targetImportanceBreakdown=importance_breakdown,
+            nextRecommendedMilestoneId=next_rec_id,
             milestones=milestones,
             provenance=provenance,
             createdAt=now_iso,

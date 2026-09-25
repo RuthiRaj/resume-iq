@@ -10,7 +10,8 @@ Provides endpoints to:
 """
 
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.auth import get_authenticated_user, AuthenticatedUser
 from app.schemas.career_roadmap import (
     RoadmapPlan,
@@ -50,12 +51,18 @@ async def generate_roadmap_endpoint(
 @router.get(
     "",
     response_model=ListRoadmapsResponse,
-    summary="List all career roadmaps belonging to the authenticated candidate",
+    summary="List all career roadmaps belonging to the authenticated candidate with optional filters",
 )
 async def list_roadmaps_endpoint(
+    target_role: Optional[str] = Query(None, description="Filter roadmaps by matching target role substring"),
+    active_only: Optional[bool] = Query(None, description="If true, return only active roadmaps (< 100% completed)"),
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> ListRoadmapsResponse:
-    return await CareerRoadmapService.list_roadmaps(current_user)
+    return await CareerRoadmapService.list_roadmaps(
+        current_user,
+        target_role=target_role,
+        active_only=active_only,
+    )
 
 
 @router.get(

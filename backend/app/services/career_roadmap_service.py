@@ -1,12 +1,13 @@
 """
-Career Roadmap Service (Phase 5.1)
+Career Roadmap Service (Phase 5.1 — Milestone 2)
 
 Orchestrates:
-1. Deterministic Career Roadmap Generation
+1. Deterministic Career Roadmap Generation with DAG Dependencies
 2. Roadmap Persistence & Retrieval under users/{uid}/roadmaps/{roadmapId}
-3. Milestone Progress Lifecycle & Verification Artifact Validation
-4. Strict Optimistic Concurrency & Tenant Isolation
-5. Zero Root Evidence Contamination (Roadmap is derived intelligence only)
+3. Dependency-Aware Milestone Progression & Prerequisite Validation
+4. Aggregate Recalculation (Progress, Time, Next Recommended Milestone)
+5. Strict Optimistic Concurrency & Multi-Roadmap Tenant Isolation
+6. Zero Root Evidence Contamination (Roadmap is derived planning intelligence only)
 """
 
 import uuid
@@ -54,7 +55,8 @@ VALID_TRANSITIONS: Dict[str, Set[str]] = {
 class CareerRoadmapService:
     """
     Service layer for Career Roadmap Engine.
-    Guarantees strict tenant isolation, evidence non-contamination, and optimistic concurrency.
+    Guarantees strict tenant isolation, DAG dependency gating, evidence non-contamination,
+    and optimistic concurrency.
     """
 
     @classmethod
@@ -150,8 +152,10 @@ class CareerRoadmapService:
     async def list_roadmaps(
         cls,
         user: AuthenticatedUser,
+        target_role: Optional[str] = None,
+        active_only: Optional[bool] = None,
     ) -> ListRoadmapsResponse:
-        """Lists all career roadmaps belonging to the authenticated candidate."""
+        """Lists all career roadmaps belonging to the authenticated candidate with optional filters."""
         subcol_url = f"{_get_firestore_base_url()}/users/{user.uid}/roadmaps"
         headers = {"Authorization": f"Bearer {user.token}"}
         client = get_http_client()
@@ -164,7 +168,12 @@ class CareerRoadmapService:
                 for d in docs:
                     decoded = _decode_firestore_doc(d)
                     try:
-                        roadmaps.append(RoadmapPlan.model_validate(decoded))
+                        plan = RoadmapPlan.model_validate(decoded)
+                        if target_role and target_role.strip().lower() not in plan.target_role.lower():
+                            continue
+                        if active_only and plan.overall_progress_pct >= 100:
+                            continue
+                        roadmaps.append(plan)
                     except Exception:
                         pass
         except Exception as e:
@@ -183,8 +192,8 @@ class CareerRoadmapService:
         req: UpdateMilestoneProgressRequest,
     ) -> RoadmapPlan:
         """
-        Updates milestone progression state, validates state transitions, attaches verification
-        artifacts or attestation records, and updates aggregates with optimistic concurrency.
+        Updates milestone progression state, validates state transitions and DAG prerequisite completion,
+        attaches verification artifacts or attestation records, and updates aggregates with optimistic concurrency.
         """
         roadmap = await cls.get_roadmap(user, roadmap_id)
 
@@ -197,10 +206,11 @@ class CareerRoadmapService:
 
         # 2. Locate Target Milestone
         target_ms: Optional[RoadmapMilestone] = None
+        ms_map: Dict[str, RoadmapMilestone] = {}
         for ms in roadmap.milestones:
+            ms_map[ms.milestone_id] = ms
             if ms.milestone_id == req.milestone_id:
                 target_ms = ms
-                break
 
         if not target_ms:
             raise HTTPException(
@@ -220,9 +230,25 @@ class CareerRoadmapService:
                     detail=f"Invalid milestone state transition from '{current_state}' to '{target_state}'.",
                 )
 
+        # 4. Dependency DAG Progression Gating
+        # Cannot transition to IN_PROGRESS, ARTIFACT_SUBMITTED, or VERIFIED_PROJECT if any prerequisite milestone is incomplete
+        if target_state in ("IN_PROGRESS", "ARTIFACT_SUBMITTED", "VERIFIED_PROJECT"):
+            for prereq_id in target_ms.prerequisite_milestone_ids:
+                prereq_ms = ms_map.get(prereq_id)
+                if not prereq_ms:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Milestone '{target_ms.title}' references non-existent prerequisite milestone '{prereq_id}'.",
+                    )
+                if prereq_ms.state not in ("VERIFIED_PROJECT", "ATTESTED"):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"Cannot transition milestone '{target_ms.title}' to '{target_state}': prerequisite milestone '{prereq_ms.title}' ({prereq_ms.milestone_id}) is not completed (current state: {prereq_ms.state}).",
+                    )
+
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        # 4. Handle State-Specific Progression & Security Validation
+        # 5. Handle State-Specific Progression & Security Validation
         if target_state == "IN_PROGRESS":
             if not target_ms.started_at:
                 target_ms.started_at = now_iso
@@ -320,17 +346,18 @@ class CareerRoadmapService:
         # Apply State
         target_ms.state = target_state
 
-        # 5. Recompute Aggregates & Bump Version
+        # 6. Recompute Aggregates & Bump Version
         completed_count = sum(
             1 for m in roadmap.milestones if m.state in ("VERIFIED_PROJECT", "ATTESTED")
         )
         total_count = len(roadmap.milestones)
         roadmap.completed_milestones = completed_count
         roadmap.overall_progress_pct = int((completed_count / total_count) * 100) if total_count > 0 else 0
+        roadmap.next_recommended_milestone_id = RoadmapGenerator.calculate_next_recommended_milestone_id(roadmap.milestones)
         roadmap.version += 1
         roadmap.updated_at = now_iso
 
-        # 6. Persist Updated Roadmap
+        # 7. Persist Updated Roadmap
         doc_payload = roadmap.model_dump(by_alias=True)
         saved = await cls._save_roadmap_doc(user, roadmap_id, doc_payload)
         if not saved:

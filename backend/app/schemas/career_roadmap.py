@@ -1,11 +1,12 @@
 """
-Pydantic v2 Schemas for Career Roadmap Engine (Phase 5.1)
+Pydantic v2 Schemas for Career Roadmap Engine (Phase 5.1 — Milestone 2)
 
 Defines strongly-typed contracts for:
 - Progressive capability roadmap plans (RoadmapPlan)
-- Grounded milestones (RoadmapMilestone)
+- Grounded milestones with explicit DAG dependency IDs (RoadmapMilestone)
 - Deterministic progress state machine (MilestoneState)
 - Auditable verification artifacts (VerificationArtifact)
+- Plan-level time, priority, and next-recommended-milestone aggregates
 - Milestone progression and roadmap API contracts
 """
 
@@ -41,6 +42,14 @@ ArtifactType = Literal[
 ]
 
 
+class TargetImportanceBreakdown(BaseModel):
+    """Aggregate counts of target requirements classified by importance."""
+    must_have_count: int = Field(default=0, ge=0, alias="mustHaveCount")
+    preferred_count: int = Field(default=0, ge=0, alias="preferredCount")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
 class VerificationArtifact(BaseModel):
     """Auditable proof of project completion or attestation for a roadmap milestone."""
     artifact_id: str = Field(..., alias="artifactId", description="Unique artifact ID (art_...)")
@@ -67,15 +76,17 @@ class VerificationArtifactInput(BaseModel):
 class RoadmapMilestone(BaseModel):
     """
     A single grounded milestone within a career capability roadmap.
-    Traceable to prerequisite evidence and target requirements.
+    Traceable to prerequisite evidence, target requirements, and DAG prerequisite milestones.
     """
     milestone_id: str = Field(..., alias="milestoneId", description="Unique milestone ID (ms_...)")
     order_index: int = Field(..., ge=0, alias="orderIndex")
     title: str
     category: MilestoneCategory
     requirement_name: str = Field(..., alias="requirementName")
+    importance: Literal["MustHave", "Preferred", "Unspecified"] = Field(default="MustHave")
     target_capability: str = Field(..., alias="targetCapability")
     prerequisite_evidence_ids: List[str] = Field(default_factory=list, alias="prerequisiteEvidenceIds")
+    prerequisite_milestone_ids: List[str] = Field(default_factory=list, alias="prerequisiteMilestoneIds")
     source_bridge_id: Optional[str] = Field(default=None, alias="sourceBridgeId")
     rationale: str
     estimated_weeks: int = Field(default=2, ge=1, le=52, alias="estimatedWeeks")
@@ -117,6 +128,11 @@ class RoadmapPlan(BaseModel):
     total_milestones: int = Field(default=0, alias="totalMilestones")
     completed_milestones: int = Field(default=0, alias="completedMilestones")
     overall_progress_pct: int = Field(default=0, ge=0, le=100, alias="overallProgressPct")
+    estimated_total_weeks: int = Field(default=0, ge=0, alias="estimatedTotalWeeks")
+    target_importance_breakdown: TargetImportanceBreakdown = Field(
+        default_factory=TargetImportanceBreakdown, alias="targetImportanceBreakdown"
+    )
+    next_recommended_milestone_id: Optional[str] = Field(default=None, alias="nextRecommendedMilestoneId")
     milestones: List[RoadmapMilestone] = Field(default_factory=list)
     provenance: Optional[RoadmapProvenance] = None
     created_at: str = Field(..., alias="createdAt")
