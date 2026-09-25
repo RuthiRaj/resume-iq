@@ -14,13 +14,6 @@ dependencies = [
     "httpx>=0.28.0",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
-python_files = ["test_*.py"]
-asyncio_mode = "auto"
-addopts = "-p pytest_asyncio"
-
 [tool.ruff]
 line-length = 100
 target-version = "py310"
