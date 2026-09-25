@@ -1,5 +1,5 @@
 """
-Evaluation Suite Runner for ResumeIQ Phase 4.0.4
+Evaluation Suite Runner for ResumeIQ Phase 4.0.5
 
 Orchestrates execution of benchmark cases, collects structured results,
 computes category metrics, and outputs formatted evaluation reports.
@@ -41,7 +41,7 @@ class EvaluationRunner:
 
         return EvaluationSuiteReport(
             datasetVersion=DATASET_VERSION,
-            evaluatorVersion="4.0.4",
+            evaluatorVersion="4.0.5",
             totalCases=total,
             passedCases=passed,
             failedCases=failed,
@@ -92,6 +92,16 @@ class EvaluationRunner:
                 )
                 lines.append(
                     f"      IR Ranking:   MRR: {mrr:.3f} | nDCG@1: {ndcg1:.3f} | nDCG@3: {ndcg3:.3f} | nDCG@5: {ndcg5:.3f}"
+                )
+            # Print detailed decision & abstention metrics for abstention category
+            elif cat_name == "abstention" and summary.aggregated_metrics:
+                m = summary.aggregated_metrics
+                acc = m.get("avg_decision_match", 1.0)
+                conf = m.get("avg_overall_confidence", 0.0)
+                fa = m.get("total_false_acceptance", 0.0)
+                hsv = m.get("total_hard_safety_violation", 0.0)
+                lines.append(
+                    f"      Abstention Quality: Accuracy: {acc * 100:.1f}% | Avg Conf: {conf:.3f} | False Accept: {int(fa)} | Safety Violations: {int(hsv)}"
                 )
 
         if report.failed_cases > 0:

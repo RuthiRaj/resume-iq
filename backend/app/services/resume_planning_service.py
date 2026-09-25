@@ -26,10 +26,12 @@ from app.schemas.plan import (
     HardGap,
     RequirementStrategy,
 )
+from app.schemas.decision import AIAbstentionDecision
 from app.services.evidence_service import EvidenceService
 from app.services.evidence_graph_service import CareerEvidenceGraph
 from app.ai.retrieval.hybrid_matcher import HybridMatcher, MatchClass, RequirementMatchResult
 from app.ai.retrieval.evidence_ranker import EvidenceRanker, RankedEvidenceItem
+from app.ai.decision_engine import DecisionEngine
 from app.ai.skills import normalize_skill_name, normalize_skill_category
 from app.ai.claim_validator import compute_candidate_experience_years
 
@@ -430,6 +432,24 @@ class ResumePlanningService:
             ],
         )
 
+        # 12. Evaluate Deterministic Abstention Decisions for Requirements
+        abstention_decisions: List[AIAbstentionDecision] = []
+        for m in match_response.matches:
+            ev_items = [
+                evidence_graph._items_by_id[eid]
+                for eid in m.candidate_evidence_ids
+                if eid in evidence_graph._items_by_id
+            ]
+            decision = DecisionEngine.evaluate_decision(
+                requirement=m.requirement_name,
+                match_class=m.match_class,
+                matched_technology=m.matched_technology,
+                evidence_items=ev_items,
+                retrieval_score=m.confidence,
+                auth_context={"evaluatingUid": user_id, "resourceOwnerUid": user_id} if user_id else None,
+            )
+            abstention_decisions.append(decision)
+
         now_iso = datetime.now(timezone.utc).isoformat()
         plan_id = f"plan_{uuid.uuid4().hex[:12]}"
 
@@ -449,11 +469,13 @@ class ResumePlanningService:
             hardGaps=hard_gaps,
             relatedButUnverifiedRequirements=related_but_unverified_reqs,
             userConfirmationRequired=user_confirmation_reqs,
+            abstentionDecisions=abstention_decisions,
             planningMetadata={
                 "directMatchCount": len(direct_matches),
                 "hardGapCount": len(hard_gaps),
                 "relatedUnverifiedCount": len(related_unverified),
                 "userConfirmationCount": len(user_confirmation),
+                "abstentionDecisionCount": len(abstention_decisions),
                 "selectedExperienceCount": len(selected_exp_ids),
                 "selectedProjectsCount": len(selected_proj_ids),
                 "totalNormalizedItems": len(normalized_items),

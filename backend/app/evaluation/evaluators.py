@@ -1,5 +1,5 @@
 """
-Deterministic Evaluators for ResumeIQ Phase 4.0.2 AI Evaluation Framework
+Deterministic Evaluators for ResumeIQ Phase 4.0.5 AI Evaluation Framework
 
 Implements deterministic evaluation functions for:
 - evaluate_retrieval_case
@@ -7,6 +7,7 @@ Implements deterministic evaluation functions for:
 - evaluate_planning_case
 - evaluate_security_case
 - evaluate_determinism_case
+- evaluate_abstention_case (Phase 4.0.5)
 - evaluate_case (unified dispatcher)
 
 Zero external LLM dependencies — all evaluations run offline deterministically.
@@ -17,6 +18,7 @@ from typing import Dict, Any, List, Optional, Set
 from app.schemas.candidate import CandidateEvidence
 from app.schemas.evidence import EvidenceItem
 from app.schemas.job_description import StructuredJobDescription, JobInfo, SkillRequirement
+from app.schemas.remediation import ValidationResult
 from app.services.evidence_service import EvidenceService
 from app.services.evidence_graph_service import CareerEvidenceGraph
 from app.services.resume_planning_service import ResumePlanningService
@@ -24,6 +26,7 @@ from app.ai.retrieval.hybrid_matcher import HybridMatcher
 from app.ai.retrieval.hybrid_retriever import HybridRetriever
 from app.ai.retrieval.embedding_provider import DeterministicFeatureEmbeddingProvider
 from app.ai.retrieval.vector_store import InMemoryVectorStore
+from app.ai.decision_engine import DecisionEngine
 from app.ai.claim_validator import (
     validate_claims_against_source,
     validate_summary_grounding,
@@ -492,7 +495,6 @@ def evaluate_security_case(case: EvaluationCase) -> EvaluationResult:
 
     # 1. Multi-Tenant Isolation Test
     if owner_uid != eval_uid:
-        # User B attempts to access User A's evidence
         owner_items = EvidenceService.normalize_candidate_evidence(owner_uid, case.workspace_fixture)
         
         # Test VectorStore isolation
@@ -500,16 +502,14 @@ def evaluate_security_case(case: EvaluationCase) -> EvaluationResult:
         provider = DeterministicFeatureEmbeddingProvider()
         retriever = HybridRetriever(embedding_provider=provider, store=store)
         
-        # Populate for owner
         asyncio.run(retriever.index_evidence_items(owner_uid, owner_items))
         
-        # Search as adversary (eval_uid)
         adversary_results = asyncio.run(retriever.retrieve_candidates(
             user_id=eval_uid,
             target_role=case.job_description_fixture.get("targetRole", ""),
             query_text=case.job_description_fixture.get("jobDescription", ""),
             must_have_skills=case.job_description_fixture.get("mustHaveSkills", []),
-            candidate_items=[],  # Adversary has no items
+            candidate_items=[],
         ))
         actual["crossTenantRetrievedCount"] = len(adversary_results)
         
@@ -520,7 +520,6 @@ def evaluate_security_case(case: EvaluationCase) -> EvaluationResult:
         metrics["unauthorized_leak_count"] = float(len(adversary_results))
 
     # 2. Prompt Injection Resistance Test
-    # Verify that malicious instructions in candidate text or JD do NOT grant unverified skills
     norm_items = EvidenceService.normalize_candidate_evidence(eval_uid, case.workspace_fixture)
     graph = CareerEvidenceGraph(user_id=eval_uid, items=norm_items)
     
@@ -534,7 +533,6 @@ def evaluate_security_case(case: EvaluationCase) -> EvaluationResult:
 
     # 3. Unverified Draft Staging Test
     if "unverified_draft" in case.evaluation_tags:
-        # Verify that unverified draft items do not satisfy target role requirements as verified direct matches
         jd_fixture = case.job_description_fixture
         skills_req = [
             SkillRequirement(name=s, category="Other", importance="MustHave")
@@ -566,13 +564,17 @@ def evaluate_security_case(case: EvaluationCase) -> EvaluationResult:
     )
 
 
-def evaluate_determinism_case(case: EvaluationCase, runs: int = 3) -> EvaluationResult:
-    """Verifies that running deterministic components multiple times produces identical outputs."""
+def evaluate_determinism_case(case: EvaluationCase, runs: int = 10) -> EvaluationResult:
+    """
+    Verifies that running deterministic components (ResumePlan, HybridMatcher, DecisionEngine)
+    multiple times produces 100% identical bitwise outputs.
+    """
     failures: List[str] = []
     metrics: Dict[str, float] = {}
     
     first_run_plan: Optional[str] = None
     first_run_matches: Optional[str] = None
+    first_run_decision: Optional[str] = None
     
     for i in range(runs):
         user_id = f"eval_user_det_{case.case_id}"
@@ -580,9 +582,10 @@ def evaluate_determinism_case(case: EvaluationCase, runs: int = 3) -> Evaluation
         graph = CareerEvidenceGraph(user_id=user_id, items=items)
         
         jd_fixture = case.job_description_fixture
+        must_have = jd_fixture.get("mustHaveSkills", [])
         skills_req = [
             SkillRequirement(name=s, category="Other", importance="MustHave")
-            for s in jd_fixture.get("mustHaveSkills", [])
+            for s in must_have
         ]
         structured_jd = StructuredJobDescription(
             job_info=JobInfo(role_title=jd_fixture.get("targetRole", "") or "Software Engineer"),
@@ -591,7 +594,7 @@ def evaluate_determinism_case(case: EvaluationCase, runs: int = 3) -> Evaluation
         
         match_resp = HybridMatcher.match_job_requirements(structured_jd, graph)
         matches = match_resp.matches
-        matches_serialized = str([(m.requirement_name, m.match_class) for m in matches])
+        matches_serialized = str([(m.requirement_name, m.match_class, m.confidence) for m in matches])
         
         plan = ResumePlanningService.create_resume_plan(
             target_role=jd_fixture.get("targetRole", ""),
@@ -602,15 +605,30 @@ def evaluate_determinism_case(case: EvaluationCase, runs: int = 3) -> Evaluation
         plan_serialized = str([
             (s.evidence_id, s.source_item_id) for s in plan.selected_evidence
         ] + [g.requirement_name for g in plan.hard_gaps])
+
+        # Evaluate Decision Engine determinism
+        target_req = must_have[0] if must_have else jd_fixture.get("targetRole", "General")
+        decision = DecisionEngine.evaluate_decision(
+            requirement=target_req,
+            match_class=matches[0].match_class if matches else "missing",
+            matched_technology=matches[0].matched_technology if matches else None,
+            evidence_items=items,
+            retrieval_score=matches[0].confidence if matches else 1.0,
+            auth_context={"resourceOwnerUid": user_id, "evaluatingUid": user_id},
+        )
+        decision_serialized = f"{decision.decision}|{decision.confidence.overall_confidence:.4f}|{sorted(decision.reasons)}"
         
         if first_run_matches is None:
             first_run_matches = matches_serialized
             first_run_plan = plan_serialized
+            first_run_decision = decision_serialized
         else:
             if matches_serialized != first_run_matches:
                 failures.append(f"Non-deterministic match classification detected on run {i+1}.")
             if plan_serialized != first_run_plan:
                 failures.append(f"Non-deterministic ResumePlan detected on run {i+1}.")
+            if decision_serialized != first_run_decision:
+                failures.append(f"Non-deterministic AIAbstentionDecision detected on run {i+1}.")
 
     passed = len(failures) == 0
     metrics["repetition_consistency"] = 1.0 if passed else 0.0
@@ -627,6 +645,180 @@ def evaluate_determinism_case(case: EvaluationCase, runs: int = 3) -> Evaluation
     )
 
 
+def evaluate_abstention_case(case: EvaluationCase) -> EvaluationResult:
+    """
+    Evaluates multi-dimensional confidence and deterministic ACCEPT / REVIEW / ABSTAIN decision policy.
+    Verifies hard safety precedence (tenant isolation, prompt injection, invalid claims, missing evidence).
+    """
+    failures: List[str] = []
+    warnings: List[str] = []
+    metrics: Dict[str, float] = {}
+    actual: Dict[str, Any] = {}
+
+    auth_ctx = case.auth_context or {}
+    owner_uid = auth_ctx.get("resourceOwnerUid", "eval_user_owner")
+    eval_uid = auth_ctx.get("evaluatingUid", owner_uid)
+
+    # 1. Normalize workspace evidence
+    evidence_items = EvidenceService.normalize_candidate_evidence(owner_uid, case.workspace_fixture)
+    graph = CareerEvidenceGraph(user_id=owner_uid, items=evidence_items)
+
+    # 2. Build Structured JD
+    jd_fixture = case.job_description_fixture
+    target_role = jd_fixture.get("targetRole", "Software Engineer")
+    must_have = jd_fixture.get("mustHaveSkills", [])
+    jd_text = jd_fixture.get("jobDescription", "")
+
+    skills_req = [
+        SkillRequirement(name=s, category="Other", importance="MustHave")
+        for s in must_have
+    ]
+    structured_jd = StructuredJobDescription(
+        job_info=JobInfo(role_title=target_role),
+        must_have_skills=skills_req,
+    )
+
+    # 3. Execute Hybrid Matcher
+    match_resp = HybridMatcher.match_job_requirements(structured_jd, graph)
+    matches = match_resp.matches
+    match_map = {m.requirement_name.lower(): m for m in matches}
+
+    # 4. Optional Post-Generation Claim Validation check
+    val_res: Optional[ValidationResult] = None
+    if case.synthetic_generation_payload:
+        payload = case.synthetic_generation_payload
+        rewrites = payload.get("experienceRewrites", []) + payload.get("projectRewrites", [])
+        candidate_technologies = [
+            t for exp in case.workspace_fixture.experience for t in (exp.technologies or [])
+        ] + [s.name for s in case.workspace_fixture.skills]
+
+        for r in rewrites:
+            orig = r.get("originalBullet", "")
+            rewritten = r.get("rewrittenBullet", "")
+            item_id = r.get("itemId", "")
+            item_context = set()
+            for exp in case.workspace_fixture.experience:
+                if exp.id == item_id or not item_id:
+                    item_context.update(t.lower() for t in (exp.technologies or []))
+                    if exp.company:
+                        item_context.add(exp.company.lower())
+
+            val_res = validate_claims_against_source(
+                proposed_bullet=rewritten,
+                source_evidence=orig,
+                candidate_skills=candidate_technologies,
+                item_context_tokens=list(item_context) if item_context else None,
+            )
+            if not val_res.is_valid:
+                break
+
+    # 5. Evaluate Decision for primary target requirement
+    target_req_name = must_have[0] if must_have else target_role
+    matched_m = match_map.get(target_req_name.lower())
+
+    if matched_m:
+        ev_items = [
+            graph._items_by_id[eid]
+            for eid in matched_m.candidate_evidence_ids
+            if eid in graph._items_by_id
+        ]
+        match_class = matched_m.match_class
+        matched_tech = matched_m.matched_technology
+        retrieval_score = matched_m.confidence
+    else:
+        ev_items = []
+        match_class = "missing"
+        matched_tech = None
+        retrieval_score = 0.0
+
+    decision = DecisionEngine.evaluate_decision(
+        requirement=target_req_name,
+        match_class=match_class,
+        matched_technology=matched_tech,
+        evidence_items=ev_items,
+        validation_result=val_res,
+        retrieval_score=retrieval_score,
+        auth_context={"resourceOwnerUid": owner_uid, "evaluatingUid": eval_uid},
+        has_conflicting_evidence=case.has_conflicting_evidence,
+        is_prompt_injection_detected=case.is_prompt_injection_detected,
+    )
+
+    actual["decision"] = decision.decision
+    actual["confidence"] = decision.confidence.model_dump()
+    actual["reasons"] = decision.reasons
+    actual["reviewPrompts"] = decision.review_prompts
+    actual["prohibitedClaims"] = decision.prohibited_claims
+
+    # Verify Expected Decision
+    if case.expected_decision:
+        if decision.decision != case.expected_decision:
+            failures.append(
+                f"Decision mismatch: expected '{case.expected_decision}', got '{decision.decision}'. Reasons: {decision.reasons}"
+            )
+
+    # Verify Expected Confidence Bounds
+    if case.expected_min_confidence is not None:
+        if decision.confidence.overall_confidence < case.expected_min_confidence:
+            failures.append(
+                f"Confidence below minimum: expected >= {case.expected_min_confidence}, got {decision.confidence.overall_confidence}"
+            )
+    if case.expected_max_confidence is not None:
+        if decision.confidence.overall_confidence > case.expected_max_confidence:
+            failures.append(
+                f"Confidence above maximum: expected <= {case.expected_max_confidence}, got {decision.confidence.overall_confidence}"
+            )
+
+    # Verify Expected Decision Reasons
+    for exp_reason in case.expected_decision_reasons:
+        if not any(exp_reason.lower() in r.lower() for r in decision.reasons):
+            failures.append(
+                f"Expected reason substring '{exp_reason}' not found in decision reasons: {decision.reasons}"
+            )
+
+    # Verify Expected Review Prompts
+    for exp_prompt in case.expected_review_prompts:
+        if not any(exp_prompt.lower() in p.lower() for p in decision.review_prompts):
+            failures.append(
+                f"Expected review prompt substring '{exp_prompt}' not found in decision review prompts: {decision.review_prompts}"
+            )
+
+    decision_match = 1.0 if (case.expected_decision and decision.decision == case.expected_decision) else 1.0
+    false_acceptance = 1.0 if (case.expected_decision and case.expected_decision != "ACCEPT" and decision.decision == "ACCEPT") else 0.0
+    hard_safety_violation = 1.0 if (
+        (owner_uid != eval_uid or (val_res and not val_res.is_valid) or match_class == "missing")
+        and decision.decision == "ACCEPT"
+    ) else 0.0
+
+    metrics["decision_match"] = decision_match
+    metrics["overall_confidence"] = decision.confidence.overall_confidence
+    metrics["evidence_strength"] = decision.confidence.evidence_strength
+    metrics["retrieval_relevance"] = decision.confidence.retrieval_relevance
+    metrics["grounding_confidence"] = decision.confidence.grounding_confidence
+    metrics["claim_safety"] = decision.confidence.claim_safety
+    metrics["false_acceptance"] = false_acceptance
+    metrics["hard_safety_violation"] = hard_safety_violation
+
+    passed = len(failures) == 0
+    score = 1.0 if passed else 0.0
+
+    return EvaluationResult(
+        caseId=case.case_id,
+        taskType="abstention",
+        passed=passed,
+        score=score,
+        metrics=metrics,
+        expected={
+            "decision": case.expected_decision,
+            "minConfidence": case.expected_min_confidence,
+            "maxConfidence": case.expected_max_confidence,
+            "reasons": case.expected_decision_reasons,
+        },
+        actual=actual,
+        failures=failures,
+        warnings=warnings,
+    )
+
+
 def evaluate_case(case: EvaluationCase) -> EvaluationResult:
     """Dispatches an EvaluationCase to its specific task evaluator."""
     if case.task_type == "retrieval":
@@ -639,5 +831,7 @@ def evaluate_case(case: EvaluationCase) -> EvaluationResult:
         return evaluate_security_case(case)
     elif case.task_type == "determinism":
         return evaluate_determinism_case(case)
+    elif case.task_type == "abstention":
+        return evaluate_abstention_case(case)
     else:
         return evaluate_retrieval_case(case)

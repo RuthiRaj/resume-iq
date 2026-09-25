@@ -111,8 +111,8 @@ class EvidenceService:
                     domain="Engineering",
                     sourceDocumentId=exp.source_document_id,
                     sourceDocumentName=exp.source_document_name,
-                    verificationStatus="verified",
-                    confidence=1.0,
+                    verificationStatus=getattr(exp, "verification_status", "verified") or "verified",
+                    confidence=float(getattr(exp, "confidence", 1.0) if getattr(exp, "confidence", None) is not None else 1.0),
                 )
             )
 
@@ -141,8 +141,8 @@ class EvidenceService:
                     domain="Projects",
                     sourceDocumentId=proj.source_document_id,
                     sourceDocumentName=proj.source_document_name,
-                    verificationStatus="verified",
-                    confidence=1.0,
+                    verificationStatus=getattr(proj, "verification_status", "verified") or "verified",
+                    confidence=float(getattr(proj, "confidence", 1.0) if getattr(proj, "confidence", None) is not None else 1.0),
                 )
             )
 
@@ -151,6 +151,7 @@ class EvidenceService:
             item_id = skill.id or f"skill_{idx}"
             norm_name = normalize_skill_name(skill.name)
             norm_cat = normalize_skill_category(norm_name, skill.category or "Other")
+            skill_conf = getattr(skill, "confidence", None)
             items.append(
                 EvidenceItem(
                     evidenceId=f"ev_{item_id}",
@@ -169,8 +170,8 @@ class EvidenceService:
                     domain=norm_cat,
                     sourceDocumentId=skill.source_document_id,
                     sourceDocumentName=skill.source_document_name,
-                    verificationStatus="verified",
-                    confidence=0.85,  # Standalone skill tags have slightly lower depth confidence than narrative evidence
+                    verificationStatus=getattr(skill, "verification_status", "verified") or "verified",
+                    confidence=float(skill_conf if skill_conf is not None else 0.85),
                 )
             )
 
@@ -196,8 +197,8 @@ class EvidenceService:
                     domain="Academic",
                     sourceDocumentId=edu.source_document_id,
                     sourceDocumentName=edu.source_document_name,
-                    verificationStatus="verified",
-                    confidence=1.0,
+                    verificationStatus=getattr(edu, "verification_status", "verified") or "verified",
+                    confidence=float(getattr(edu, "confidence", 1.0) if getattr(edu, "confidence", None) is not None else 1.0),
                 )
             )
 
@@ -223,8 +224,8 @@ class EvidenceService:
                     domain="Certification",
                     sourceDocumentId=cert.source_document_id,
                     sourceDocumentName=cert.source_document_name,
-                    verificationStatus="verified",
-                    confidence=1.0,
+                    verificationStatus=getattr(cert, "verification_status", "verified") or "verified",
+                    confidence=float(getattr(cert, "confidence", 1.0) if getattr(cert, "confidence", None) is not None else 1.0),
                 )
             )
 
@@ -252,8 +253,8 @@ class EvidenceService:
                     domain="Achievement",
                     sourceDocumentId=ach.source_document_id,
                     sourceDocumentName=ach.source_document_name,
-                    verificationStatus="verified",
-                    confidence=1.0,
+                    verificationStatus=getattr(ach, "verification_status", "verified") or "verified",
+                    confidence=float(getattr(ach, "confidence", 1.0) if getattr(ach, "confidence", None) is not None else 1.0),
                 )
             )
 
@@ -283,8 +284,8 @@ class EvidenceService:
                     domain="Engineering",
                     sourceDocumentId=intern.source_document_id,
                     sourceDocumentName=intern.source_document_name,
-                    verificationStatus="verified",
-                    confidence=1.0,
+                    verificationStatus=getattr(intern, "verification_status", "verified") or "verified",
+                    confidence=float(getattr(intern, "confidence", 1.0) if getattr(intern, "confidence", None) is not None else 1.0),
                 )
             )
 

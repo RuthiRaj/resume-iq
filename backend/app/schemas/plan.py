@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field, ConfigDict
 from app.schemas.evidence import EvidenceSourceType
 from app.schemas.requirement_match import GapType
+from app.schemas.decision import AIAbstentionDecision
 from app.ai.retrieval.hybrid_matcher import MatchClass
 
 
@@ -176,6 +177,11 @@ class ResumePlan(BaseModel):
         default_factory=list,
         alias="userConfirmationRequired",
         description="Skills listed as standalone tags without supporting work/project narratives",
+    )
+    abstention_decisions: List[AIAbstentionDecision] = Field(
+        default_factory=list,
+        alias="abstentionDecisions",
+        description="Explicit safety and abstention decisions for target requirements",
     )
     planning_metadata: Dict[str, Any] = Field(default_factory=dict, alias="planningMetadata")
     created_at: str = Field(..., alias="createdAt")

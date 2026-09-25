@@ -35,7 +35,7 @@ def test_golden_dataset_integrity():
     """Verifies that the golden dataset loads unique, well-formed benchmark cases."""
     cases = get_golden_cases()
     assert len(cases) >= 18, f"Expected at least 18 golden cases, found {len(cases)}"
-    assert DATASET_VERSION in ("4.0.2", "4.0.3", "4.0.4")
+    assert DATASET_VERSION in ("4.0.2", "4.0.3", "4.0.4", "4.0.5")
 
     case_ids = [c.case_id for c in cases]
     assert len(case_ids) == len(set(case_ids)), "Duplicate case IDs detected in golden dataset!"
@@ -43,7 +43,7 @@ def test_golden_dataset_integrity():
     for c in cases:
         assert c.case_id.startswith("CASE_")
         assert c.description
-        assert c.task_type in ("retrieval", "grounding", "planning", "security", "determinism")
+        assert c.task_type in ("retrieval", "grounding", "planning", "security", "determinism", "abstention")
         assert isinstance(c.workspace_fixture, CandidateEvidence)
 
 

@@ -32,7 +32,7 @@ from app.evaluation.runner import EvaluationRunner
 
 def test_dataset_version_4_0_3():
     """Verifies that dataset version is valid and contains all 35 Phase 4.0.3 cases."""
-    assert DATASET_VERSION in ("4.0.3", "4.0.4")
+    assert DATASET_VERSION in ("4.0.3", "4.0.4", "4.0.5")
     cases = get_golden_cases()
     assert len(cases) >= 35
     case_ids = {c.case_id for c in cases}

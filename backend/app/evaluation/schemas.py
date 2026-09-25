@@ -1,8 +1,8 @@
 """
-Evaluation Schemas for ResumeIQ Phase 4.0.2 AI Evaluation Framework
+Evaluation Schemas for ResumeIQ Phase 4.0.5 AI Evaluation Framework
 
 Defines strict, deterministic, Pydantic v2 contracts for:
-- EvaluationTaskType: Classification of the AI evaluation task
+- EvaluationTaskType: Classification of the AI evaluation task (including abstention & confidence)
 - EvaluationCase: Input payload, expectations, and metadata for a benchmark case
 - EvaluationResult: Granular, explainable outcome of evaluating a single case
 - CategoryMetrics: Aggregated metrics across task categories
@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Literal, Set
 from pydantic import BaseModel, Field, ConfigDict
 from app.schemas.candidate import CandidateEvidence
 from app.schemas.evidence import EvidenceItem, VerificationStatus
+from app.schemas.decision import DecisionType, ConfidenceBreakdown, AIAbstentionDecision
 
 
 EvaluationTaskType = Literal[
@@ -22,6 +23,7 @@ EvaluationTaskType = Literal[
     "planning",
     "security",
     "determinism",
+    "abstention",
 ]
 
 ExpectedMatchClass = Literal[
@@ -104,11 +106,48 @@ class EvaluationCase(BaseModel):
         alias="authContext",
         description="Security context (e.g. evaluating user ID vs resource owner ID)",
     )
+
+    # Phase 4.0.5 Decision / Abstention Expectations
+    expected_decision: Optional[DecisionType] = Field(
+        default=None,
+        alias="expectedDecision",
+        description="Expected authoritative decision: ACCEPT, REVIEW, or ABSTAIN",
+    )
+    expected_decision_reasons: List[str] = Field(
+        default_factory=list,
+        alias="expectedDecisionReasons",
+        description="Expected reason substrings that must appear in decision reasoning",
+    )
+    expected_review_prompts: List[str] = Field(
+        default_factory=list,
+        alias="expectedReviewPrompts",
+        description="Expected candidate review prompts for REVIEW decisions",
+    )
+    expected_min_confidence: Optional[float] = Field(
+        default=None,
+        alias="expectedMinConfidence",
+        description="Lower bound for expected overall confidence score",
+    )
+    expected_max_confidence: Optional[float] = Field(
+        default=None,
+        alias="expectedMaxConfidence",
+        description="Upper bound for expected overall confidence score",
+    )
+    has_conflicting_evidence: bool = Field(
+        default=False,
+        alias="hasConflictingEvidence",
+        description="Whether workspace fixture contains mutually conflicting evidence",
+    )
+    is_prompt_injection_detected: bool = Field(
+        default=False,
+        alias="isPromptInjectionDetected",
+        description="Whether adversarial prompt manipulation is embedded in test inputs",
+    )
     
     evaluation_tags: List[str] = Field(
         default_factory=list,
         alias="evaluationTags",
-        description="Tags for filtering (e.g. ['exact_match', 'security', 'regression'])",
+        description="Tags for filtering (e.g. ['exact_match', 'security', 'abstention', 'regression'])",
     )
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
@@ -150,8 +189,8 @@ class EvaluationSuiteReport(BaseModel):
     Complete benchmark evaluation run report.
     Fully versioned and reproducible.
     """
-    dataset_version: str = Field(default="4.0.4", alias="datasetVersion")
-    evaluator_version: str = Field(default="4.0.4", alias="evaluatorVersion")
+    dataset_version: str = Field(default="4.0.5", alias="datasetVersion")
+    evaluator_version: str = Field(default="4.0.5", alias="evaluatorVersion")
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO 8601 UTC timestamp of evaluation run",

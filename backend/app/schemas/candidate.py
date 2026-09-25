@@ -13,6 +13,8 @@ class ExperienceItem(BaseModel):
     technologies: List[str] = Field(default_factory=list)
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
+    verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -26,6 +28,8 @@ class ProjectItem(BaseModel):
     tech_stack: List[str] = Field(default_factory=list, alias="techStack")
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
+    verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -37,6 +41,8 @@ class SkillItem(BaseModel):
     proficiency: str = "Intermediate"
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
+    verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -48,6 +54,8 @@ class EducationItem(BaseModel):
     field_of_study: str = Field(default="", alias="fieldOfStudy")
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
+    verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -58,6 +66,8 @@ class CertificationItem(BaseModel):
     issuer: str
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
+    verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -71,6 +81,8 @@ class AchievementItem(BaseModel):
     url: Optional[str] = ""
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
+    verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
     model_config = ConfigDict(populate_by_name=True)
 

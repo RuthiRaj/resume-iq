@@ -1,19 +1,26 @@
 """
-Metrics Aggregation Engine for ResumeIQ Phase 4.0.4 AI Evaluation Framework
+Metrics Aggregation Engine for ResumeIQ Phase 4.0.5 AI Evaluation Framework
 
-Computes granular Information Retrieval and ranking metrics:
-- Precision@K (P@1, P@3, P@5)
-- Recall@K (R@1, R@3, R@5)
-- Mean Reciprocal Rank (MRR)
-- Normalized Discounted Cumulative Gain (nDCG@1, nDCG@3, nDCG@5)
-- Hit Rate (Hit@K)
-- Aggregated rates across task categories (retrieval, grounding, planning, security, determinism)
+Computes granular Information Retrieval, Ranking, and AI Abstention / Confidence metrics:
+- Information Retrieval & Ranking:
+  * Precision@K (P@1, P@3, P@5)
+  * Recall@K (R@1, R@3, R@5)
+  * Mean Reciprocal Rank (MRR)
+  * Normalized Discounted Cumulative Gain (nDCG@1, nDCG@3, nDCG@5)
+  * Hit Rate (Hit@K)
+- Decision & Abstention Quality:
+  * Decision Accuracy (exact match between actual and expected ACCEPT / REVIEW / ABSTAIN)
+  * Abstention Precision & Recall
+  * False Acceptance Count & False Acceptance Rate
+  * Hard Safety Violation Count (critical safety failures misclassified as ACCEPT)
+  * Expected Calibration Error (ECE) for discrete decision support bins
+- Category Summaries across (retrieval, grounding, planning, security, determinism, abstention)
 
 All metric calculations are pure, deterministic, and 100% offline.
 """
 
 import math
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from app.evaluation.schemas import EvaluationResult, CategorySummary
 
 
@@ -184,6 +191,59 @@ def calculate_ndcg_at_k(
     return min(1.0, dcg / idcg)
 
 
+def calculate_expected_calibration_error(
+    confidences: List[float],
+    correctness_labels: List[int],
+    num_bins: int = 5,
+) -> float:
+    """
+    Computes Expected Calibration Error (ECE) for offline decision-support confidence scores.
+
+    Formula:
+      ECE = sum_{b=1}^{B} (|B_b| / N) * |acc(B_b) - conf(B_b)|
+
+    Binning:
+      Divides [0.0, 1.0] into equal-width intervals (e.g. 5 bins: [0, 0.2), [0.2, 0.4), ..., [0.8, 1.0]).
+
+    Limitations:
+      Heuristic confidence scores represent deterministic multi-dimensional safety scores,
+      not posterior Bayesian probabilities. ECE is computed here to verify monotonic alignment
+      between decision confidence and evaluation correctness.
+    """
+    if not confidences or not correctness_labels or len(confidences) != len(correctness_labels):
+        return 0.0
+
+    n = len(confidences)
+    bin_size = 1.0 / num_bins
+    ece = 0.0
+
+    for i in range(num_bins):
+        bin_lower = i * bin_size
+        bin_upper = (i + 1) * bin_size
+        # Include upper boundary in last bin
+        if i == num_bins - 1:
+            indices = [
+                idx for idx, c in enumerate(confidences)
+                if bin_lower <= c <= bin_upper
+            ]
+        else:
+            indices = [
+                idx for idx, c in enumerate(confidences)
+                if bin_lower <= c < bin_upper
+            ]
+
+        if not indices:
+            continue
+
+        bin_count = len(indices)
+        bin_acc = sum(correctness_labels[idx] for idx in indices) / float(bin_count)
+        bin_conf = sum(confidences[idx] for idx in indices) / float(bin_count)
+
+        ece += (float(bin_count) / float(n)) * abs(bin_acc - bin_conf)
+
+    return round(ece, 4)
+
+
 def compute_category_summary(task_type: str, results: List[EvaluationResult]) -> CategorySummary:
     """Computes aggregated metrics and pass rate for a specific evaluation task category."""
     cat_results = [r for r in results if r.task_type == task_type]
@@ -224,8 +284,7 @@ def compute_category_summary(task_type: str, results: List[EvaluationResult]) ->
 
 def summarize_evaluation_results(results: List[EvaluationResult]) -> Dict[str, CategorySummary]:
     """Generates a mapping of task_type to CategorySummary across all evaluation categories."""
-    task_types = {"retrieval", "grounding", "planning", "security", "determinism"}
-    # Also include any task types present in results
+    task_types = {"retrieval", "grounding", "planning", "security", "determinism", "abstention"}
     task_types.update(r.task_type for r in results)
 
     return {
