@@ -5,7 +5,9 @@ from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import PyJWKClient
 from app.core.config import settings
+from app.core.logging import get_logger
 
+logger = get_logger("app.core.auth")
 security_scheme = HTTPBearer(auto_error=False)
 
 GOOGLE_JWKS_URL = (
@@ -38,6 +40,10 @@ async def get_authenticated_user(
     issuer, audience (project ID), and extracts the authenticated UID.
     """
     if not credentials or not credentials.credentials:
+        logger.warning(
+            "Authentication failed: Missing Authorization header",
+            extra={"event": "auth_failure", "reason": "missing_header", "component": "auth"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header. Expected 'Bearer <Firebase_ID_Token>'.",
@@ -46,6 +52,10 @@ async def get_authenticated_user(
 
     id_token = credentials.credentials.strip()
     if not id_token:
+        logger.warning(
+            "Authentication failed: Empty bearer token",
+            extra={"event": "auth_failure", "reason": "empty_token", "component": "auth"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Bearer token is empty.",
@@ -54,6 +64,10 @@ async def get_authenticated_user(
 
     project_id = settings.FIREBASE_PROJECT_ID
     if not project_id:
+        logger.error(
+            "Authentication configuration error: FIREBASE_PROJECT_ID not set",
+            extra={"event": "auth_error", "reason": "missing_project_id", "component": "auth"},
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="FIREBASE_PROJECT_ID is not configured on the backend server.",
@@ -74,6 +88,10 @@ async def get_authenticated_user(
 
         uid = decoded.get("sub")
         if not uid or not isinstance(uid, str) or not uid.strip():
+            logger.warning(
+                "Authentication failed: No valid UID in decoded token",
+                extra={"event": "auth_failure", "reason": "missing_uid", "component": "auth"},
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token validation failed: No valid UID subject found in token.",
@@ -86,12 +104,20 @@ async def get_authenticated_user(
             email=decoded.get("email"),
         )
     except jwt.ExpiredSignatureError:
+        logger.warning(
+            "Authentication failed: Firebase ID token expired",
+            extra={"event": "auth_failure", "reason": "token_expired", "component": "auth"},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Firebase ID token has expired. Please refresh your session.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as e:
+        logger.warning(
+            "Authentication failed: Invalid token signature or claims",
+            extra={"event": "auth_failure", "reason": "invalid_token", "component": "auth", "error_type": type(e).__name__},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid Firebase ID token: {str(e)}",
@@ -100,6 +126,10 @@ async def get_authenticated_user(
     except HTTPException:
         raise
     except Exception as e:
+        logger.warning(
+            "Authentication failed: Unexpected verification error",
+            extra={"event": "auth_failure", "reason": "unexpected_error", "component": "auth", "error_type": type(e).__name__},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Firebase token verification failed: {str(e)}",

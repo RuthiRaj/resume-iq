@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import { getOrCreateRequestId, forwardHeaders, createProxyResponse } from "@/lib/server-request-utils";
 
 const BACKEND_API_URL =
   process.env.BACKEND_API_URL ||
@@ -8,21 +9,24 @@ const BACKEND_API_URL =
 /**
  * Next.js BFF Proxy Handler for AI Resume ATS Analysis.
  *
- * Forwards client requests and Firebase ID tokens directly to the FastAPI backend:
+ * Forwards client requests, Firebase ID tokens, and correlation IDs directly to FastAPI backend:
  * Browser -> Next.js BFF (POST /api/ai/analyze) -> FastAPI (POST /api/v1/ai/analyze)
  */
 export async function POST(req: NextRequest) {
+  const reqId = getOrCreateRequestId(req);
+
   // 1. Read & Validate Authorization header
   const authHeader =
     req.headers.get("Authorization") || req.headers.get("authorization");
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json(
+    return createProxyResponse(
       {
         error:
           "Missing or invalid Authorization header. Expected 'Bearer <Firebase_ID_Token>'.",
       },
-      { status: 401 }
+      401,
+      reqId
     );
   }
 
@@ -31,9 +35,10 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return createProxyResponse(
       { error: "Invalid JSON payload in request body." },
-      { status: 400 }
+      400,
+      reqId
     );
   }
 
@@ -43,10 +48,7 @@ export async function POST(req: NextRequest) {
   try {
     const backendResponse = await fetch(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: authHeader,
-      },
+      headers: forwardHeaders(req, { "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
 
@@ -60,15 +62,16 @@ export async function POST(req: NextRequest) {
       data = { error: text || "Unexpected backend response." };
     }
 
-    return NextResponse.json(data, { status: backendResponse.status });
+    return createProxyResponse(data, backendResponse.status, reqId);
   } catch (err: any) {
     // Backend unreachable or network failure
-    return NextResponse.json(
+    return createProxyResponse(
       {
         error:
           "AI backend service is temporarily unreachable. Please ensure the backend is running.",
       },
-      { status: 503 }
+      503,
+      reqId
     );
   }
 }

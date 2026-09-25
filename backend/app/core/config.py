@@ -1,5 +1,5 @@
 import json
-from typing import List, Union
+from typing import List, Union, Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,7 +9,15 @@ class Settings(BaseSettings):
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
     ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: Union[List[str], str] = Field(default_factory=lambda: ["http://localhost:3000"])
+
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def validate_log_level(cls, v: Any) -> str:
+        valid = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        val_str = str(v).upper().strip() if v else "INFO"
+        return val_str if val_str in valid else "INFO"
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

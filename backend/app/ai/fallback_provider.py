@@ -6,6 +6,7 @@ from fastapi import HTTPException, status
 import httpx
 
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.schemas.candidate import CandidateEvidence
 from app.schemas.analyze import AnalyzeResponse
 from app.ai.provider import AiAnalyzerProvider
@@ -21,6 +22,8 @@ from app.ai.observability import (
     CostBreakdown,
     calculate_token_cost,
 )
+
+logger = get_logger("app.ai.fallback")
 
 
 def has_key_for_provider(provider_name: str) -> bool:
@@ -66,6 +69,10 @@ class FallbackProvider:
         self._execution_events: List[ProviderExecutionEvent] = []
 
     @property
+    def providers(self) -> List[AiAnalyzerProvider]:
+        return list(self._providers)
+
+    @property
     def name(self) -> str:
         return "fallback"
 
@@ -105,48 +112,56 @@ class FallbackProvider:
 
     @property
     def total_latency_ms(self) -> float:
-        """Returns total provider execution duration across all attempts."""
-        return round(sum(ev.latency_ms or 0.0 for ev in self._execution_events), 2)
+        """Returns the sum of all execution latencies in milliseconds."""
+        return sum(ev.latency_ms for ev in self._execution_events)
 
-    @property
-    def providers(self) -> List[AiAnalyzerProvider]:
-        return self._providers
+    def _build_chain(self, chain_str: str) -> List[AiAnalyzerProvider]:
+        from app.ai.providers.groq_provider import GroqAnalyzerProvider
+        from app.ai.providers.gemini_provider import GeminiAnalyzerProvider
+        from app.ai.providers.nvidia_provider import NvidiaAnalyzerProvider
 
-    @staticmethod
-    def _build_chain(chain_str: str) -> List[AiAnalyzerProvider]:
-        from app.ai.factory import create_provider_by_name
+        provider_map = {
+            "groq": GroqAnalyzerProvider,
+            "gemini": GeminiAnalyzerProvider,
+            "nvidia": NvidiaAnalyzerProvider,
+        }
 
-        resolved: List[AiAnalyzerProvider] = []
-        raw_names = [name.strip() for name in chain_str.split(",") if name.strip()]
-        for name in raw_names:
-            if name.lower() == "fallback":
-                continue
-            provider = create_provider_by_name(name)
-            if has_key_for_provider(name):
-                resolved.append(provider)
-        return resolved
+        names = [n.strip().lower() for n in chain_str.split(",") if n.strip()]
+        chain: List[AiAnalyzerProvider] = []
+        for name in names:
+            if name in provider_map and has_key_for_provider(name):
+                chain.append(provider_map[name]())
+        return chain
 
     async def _execute_with_retry(
         self,
         provider: AiAnalyzerProvider,
-        func_name: str,
-        *args: Any,
-        operation: Optional[str] = None,
-        **kwargs: Any,
+        operation: str,
+        **kwargs,
     ) -> Any:
-        """Executes a provider method with bounded retry on transient errors and token/cost tracking."""
-        raw_p = getattr(provider, "name", "unknown")
-        p_name = str(raw_p) if not hasattr(raw_p, "_mock_name") and isinstance(raw_p, str) else str(getattr(provider, "name", "unknown"))
-        raw_m = getattr(provider, "model_name", p_name)
-        m_name = str(raw_m) if not hasattr(raw_m, "_mock_name") and isinstance(raw_m, str) else p_name
-
         last_exc: Optional[Exception] = None
+        raw_p = getattr(provider, "name", "unknown")
+        p_name = raw_p if isinstance(raw_p, str) else "unknown"
+        raw_m = (
+            getattr(provider, "model_name", None)
+            or getattr(provider, "_model_name", None)
+            or getattr(provider, "model", None)
+            or "unknown"
+        )
+        m_name = raw_m if isinstance(raw_m, str) else "unknown"
+
+
 
         for attempt in range(self._max_retries + 1):
             start_time = time.perf_counter()
             try:
-                method = getattr(provider, func_name)
-                res = await method(*args, **kwargs)
+                if operation == "analyze":
+                    res = await provider.analyze(**kwargs)
+                elif operation == "generate_json":
+                    res = await provider.generate_json(**kwargs)
+                else:
+                    raise ValueError(f"Unknown operation: {operation}")
+
                 latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
                 raw_u = getattr(provider, "last_usage", None)
@@ -168,6 +183,18 @@ class FallbackProvider:
                 self._execution_events.append(event)
                 self._last_provider = p_name
                 self._last_model = m_name
+
+                logger.info(
+                    f"AI provider {p_name} executed successfully in {latency_ms}ms",
+                    extra={
+                        "event": "ai_provider_success",
+                        "provider": p_name,
+                        "model": m_name,
+                        "duration_ms": latency_ms,
+                        "attempt": attempt,
+                        "total_tokens": usage.total_tokens if usage else 0,
+                    },
+                )
                 return res
             except Exception as exc:
                 latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
@@ -199,6 +226,17 @@ class FallbackProvider:
 
                 # Check if transient and we have retries left
                 if attempt < self._max_retries and is_transient_error(err_type):
+                    logger.warning(
+                        f"AI provider {p_name} transient error ({err_type.value}), retrying attempt {attempt + 1}",
+                        extra={
+                            "event": "ai_provider_retry",
+                            "provider": p_name,
+                            "model": m_name,
+                            "attempt": attempt,
+                            "error_type": err_type.value,
+                            "duration_ms": latency_ms,
+                        },
+                    )
                     backoff = min(0.05 * (2 ** attempt) + random.uniform(0.01, 0.05), 0.5)
                     await asyncio.sleep(backoff)
                     continue
@@ -241,11 +279,20 @@ class FallbackProvider:
             except HTTPException as http_exc:
                 last_error = http_exc
                 if http_exc.status_code == 429 or http_exc.status_code >= 500:
+                    err_label = f"HTTP {http_exc.status_code}"
                     self._failover_log.append({
                         "provider": provider.name,
-                        "error_type": f"HTTP {http_exc.status_code}",
+                        "error_type": err_label,
                         "reason": f"Provider {provider.name} failed with status {http_exc.status_code}: {http_exc.detail}",
                     })
+                    logger.warning(
+                        f"AI provider failover from {provider.name} due to {err_label}",
+                        extra={
+                            "event": "ai_provider_failover",
+                            "provider": provider.name,
+                            "error_type": err_label,
+                        },
+                    )
                     continue
                 # Do not fall back on 400 Bad Request, 422 Unprocessable, etc.
                 raise
@@ -253,11 +300,20 @@ class FallbackProvider:
                 raise
             except (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError) as net_err:
                 last_error = net_err
+                err_label = "Timeout" if isinstance(net_err, (asyncio.TimeoutError, httpx.TimeoutException)) else "NetworkError"
                 self._failover_log.append({
                     "provider": provider.name,
-                    "error_type": "Timeout" if isinstance(net_err, (asyncio.TimeoutError, httpx.TimeoutException)) else "NetworkError",
+                    "error_type": err_label,
                     "reason": f"Provider {provider.name} network/timeout error: {net_err}",
                 })
+                logger.warning(
+                    f"AI provider failover from {provider.name} due to {err_label}",
+                    extra={
+                        "event": "ai_provider_failover",
+                        "provider": provider.name,
+                        "error_type": err_label,
+                    },
+                )
                 continue
             except ProviderResilienceError as pre:
                 last_error = pre
@@ -266,6 +322,14 @@ class FallbackProvider:
                     "error_type": pre.error_type.value,
                     "reason": pre.detail,
                 })
+                logger.warning(
+                    f"AI provider failover from {provider.name} due to {pre.error_type.value}",
+                    extra={
+                        "event": "ai_provider_failover",
+                        "provider": provider.name,
+                        "error_type": pre.error_type.value,
+                    },
+                )
                 continue
             except Exception as exc:
                 last_error = exc
@@ -275,9 +339,21 @@ class FallbackProvider:
                     "error_type": err_type.value,
                     "reason": f"Provider {provider.name} error: {exc}",
                 })
+                logger.warning(
+                    f"AI provider failover from {provider.name} due to {err_type.value}",
+                    extra={
+                        "event": "ai_provider_failover",
+                        "provider": provider.name,
+                        "error_type": err_type.value,
+                    },
+                )
                 continue
 
         err_detail = getattr(last_error, "detail", str(last_error))
+        logger.error(
+            f"All AI providers in fallback chain failed. Last error: {err_detail}",
+            extra={"event": "ai_generation_failed", "component": "fallback_provider"},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"All AI providers in fallback chain failed. Last error: {err_detail}",
@@ -311,11 +387,20 @@ class FallbackProvider:
             except HTTPException as http_exc:
                 last_error = http_exc
                 if http_exc.status_code == 429 or http_exc.status_code >= 500:
+                    err_label = f"HTTP {http_exc.status_code}"
                     self._failover_log.append({
                         "provider": provider.name,
-                        "error_type": f"HTTP {http_exc.status_code}",
+                        "error_type": err_label,
                         "reason": f"Provider {provider.name} failed with status {http_exc.status_code}: {http_exc.detail}",
                     })
+                    logger.warning(
+                        f"AI provider failover from {provider.name} due to {err_label}",
+                        extra={
+                            "event": "ai_provider_failover",
+                            "provider": provider.name,
+                            "error_type": err_label,
+                        },
+                    )
                     continue
                 # Do not fall back on 400 Bad Request, 422 Unprocessable, etc.
                 raise
@@ -323,11 +408,20 @@ class FallbackProvider:
                 raise
             except (asyncio.TimeoutError, httpx.TimeoutException, httpx.NetworkError) as net_err:
                 last_error = net_err
+                err_label = "Timeout" if isinstance(net_err, (asyncio.TimeoutError, httpx.TimeoutException)) else "NetworkError"
                 self._failover_log.append({
                     "provider": provider.name,
-                    "error_type": "Timeout" if isinstance(net_err, (asyncio.TimeoutError, httpx.TimeoutException)) else "NetworkError",
+                    "error_type": err_label,
                     "reason": f"Provider {provider.name} network/timeout error: {net_err}",
                 })
+                logger.warning(
+                    f"AI provider failover from {provider.name} due to {err_label}",
+                    extra={
+                        "event": "ai_provider_failover",
+                        "provider": provider.name,
+                        "error_type": err_label,
+                    },
+                )
                 continue
             except ProviderResilienceError as pre:
                 last_error = pre
@@ -336,6 +430,14 @@ class FallbackProvider:
                     "error_type": pre.error_type.value,
                     "reason": pre.detail,
                 })
+                logger.warning(
+                    f"AI provider failover from {provider.name} due to {pre.error_type.value}",
+                    extra={
+                        "event": "ai_provider_failover",
+                        "provider": provider.name,
+                        "error_type": pre.error_type.value,
+                    },
+                )
                 continue
             except Exception as exc:
                 last_error = exc
@@ -345,9 +447,21 @@ class FallbackProvider:
                     "error_type": err_type.value,
                     "reason": f"Provider {provider.name} error: {exc}",
                 })
+                logger.warning(
+                    f"AI provider failover from {provider.name} due to {err_type.value}",
+                    extra={
+                        "event": "ai_provider_failover",
+                        "provider": provider.name,
+                        "error_type": err_type.value,
+                    },
+                )
                 continue
 
         err_detail = getattr(last_error, "detail", str(last_error))
+        logger.error(
+            f"All AI providers in fallback chain failed. Last error: {err_detail}",
+            extra={"event": "ai_generation_failed", "component": "fallback_provider"},
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"All AI providers in fallback chain failed. Last error: {err_detail}",

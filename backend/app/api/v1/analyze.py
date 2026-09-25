@@ -6,8 +6,10 @@ from app.services.resume_service import (
     persist_analysis_results,
 )
 from app.ai.orchestrator import run_ats_analysis
-
 from app.core.rate_limiter import ai_analysis_limiter
+from app.core.logging import get_logger
+
+logger = get_logger("app.api.v1.analyze")
 
 router = APIRouter(prefix="/ai", tags=["AI Analyzer"])
 
@@ -25,13 +27,10 @@ async def analyze_resume_endpoint(
     # 0. Enforce per-user rate limit on expensive AI analysis
     await ai_analysis_limiter.check(user.uid)
 
-    # 1. Resolve candidate evidence from Firestore strictly scoped to user.uid
-    candidate_evidence = await get_candidate_resume_data(
-        user=user,
-        resume_id=request.resume_id,
-    )
+    # 1. Fetch Candidate Evidence (FastAPI concurrency: non-blocking async REST)
+    candidate_evidence = await get_candidate_resume_data(user, request.resume_id)
 
-    # 2. Run ATS Analysis via AI Provider
+    # 2. Invoke AI Analyzer Pipeline
     analysis_result = await run_ats_analysis(
         target_role=request.target_role,
         target_company=request.target_company,
@@ -49,6 +48,9 @@ async def analyze_resume_endpoint(
             )
         except Exception as e:
             # Non-fatal persistence logging
-            print(f"Warning: Failed to persist analysis results: {e}")
+            logger.warning(
+                f"Failed to persist analysis results: {str(e)}",
+                extra={"event": "firestore_write_error", "error_type": type(e).__name__, "component": "analyze_endpoint"},
+            )
 
     return analysis_result

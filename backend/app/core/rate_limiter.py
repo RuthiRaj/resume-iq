@@ -2,6 +2,9 @@ import time
 import asyncio
 from typing import Dict, List
 from fastapi import HTTPException, status
+from app.core.logging import get_logger
+
+logger = get_logger("app.core.rate_limiter")
 
 
 class InMemoryRateLimiter:
@@ -29,6 +32,16 @@ class InMemoryRateLimiter:
             if len(valid_timestamps) >= self.max_requests:
                 oldest = valid_timestamps[0]
                 retry_after = int(self.window_seconds - (now - oldest)) + 1
+                logger.warning(
+                    f"Rate limit exceeded: {len(valid_timestamps)} requests in {self.window_seconds}s (max {self.max_requests})",
+                    extra={
+                        "event": "rate_limit_rejected",
+                        "component": "rate_limiter",
+                        "limit": self.max_requests,
+                        "window_s": self.window_seconds,
+                        "status_code": 429,
+                    },
+                )
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail=f"Rate limit exceeded. Max {self.max_requests} requests per {self.window_seconds}s. Please retry in {retry_after} seconds.",

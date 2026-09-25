@@ -19,6 +19,9 @@ from app.schemas.candidate import (
     VolunteeringItem,
 )
 from app.schemas.analyze import AnalyzeResponse
+from app.core.logging import get_logger
+
+logger = get_logger("app.services.resume_service")
 
 
 def _validate_safe_id(val: str, field_name: str = "ID") -> str:
@@ -137,8 +140,16 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             res = await client.get(url, headers=headers)
             if res.status_code == 200:
                 return _decode_firestore_doc(res.json())
-        except Exception:
-            pass
+            elif res.status_code != 404:
+                logger.warning(
+                    f"Firestore document fetch returned status {res.status_code}",
+                    extra={"event": "firestore_read_error", "status_code": res.status_code, "component": "resume_service"},
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch Firestore doc: {str(e)}",
+                extra={"event": "firestore_read_error", "error_type": type(e).__name__, "component": "resume_service"},
+            )
         return {}
 
     async def _fetch_subcollection(url: str) -> List[Dict[str, Any]]:
@@ -147,8 +158,16 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             if res.status_code == 200:
                 docs = res.json().get("documents", [])
                 return [_decode_firestore_doc(d) for d in docs]
-        except Exception:
-            pass
+            elif res.status_code != 404:
+                logger.warning(
+                    f"Firestore subcollection fetch returned status {res.status_code}",
+                    extra={"event": "firestore_read_error", "status_code": res.status_code, "component": "resume_service"},
+                )
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch Firestore subcollection: {str(e)}",
+                extra={"event": "firestore_read_error", "error_type": type(e).__name__, "component": "resume_service"},
+            )
         return []
 
     # Concurrent fetch across profile and all 10 subcollections
@@ -469,7 +488,10 @@ async def persist_analysis_results(
         merged_fields = {**existing_fields, **fields_body["fields"]}
         await client.patch(doc_url, headers=headers, json={"fields": merged_fields})
     except Exception as e:
-        print(f"Warning: Failed to persist analysis to Firestore: {e}")
+        logger.warning(
+            f"Failed to persist analysis to Firestore: {str(e)}",
+            extra={"event": "firestore_write_error", "error_type": type(e).__name__, "component": "resume_service"},
+        )
 
 
 async def get_resume_document(
@@ -484,8 +506,16 @@ async def get_resume_document(
         res = await client.get(doc_url, headers=headers)
         if res.status_code == 200:
             return _decode_firestore_doc(res.json())
-    except Exception:
-        pass
+        elif res.status_code != 404:
+            logger.warning(
+                f"Firestore get_resume_document returned status {res.status_code}",
+                extra={"event": "firestore_read_error", "status_code": res.status_code, "component": "resume_service"},
+            )
+    except Exception as e:
+        logger.warning(
+            f"Failed to get resume document: {str(e)}",
+            extra={"event": "firestore_read_error", "error_type": type(e).__name__, "component": "resume_service"},
+        )
     return None
 
 
@@ -502,7 +532,10 @@ async def save_resume_snapshot(
         res = await client.patch(doc_url, headers=headers, json=fields_body)
         return res.status_code in (200, 201)
     except Exception as e:
-        print(f"Error saving resume snapshot: {e}")
+        logger.error(
+            f"Error saving resume snapshot: {str(e)}",
+            extra={"event": "firestore_write_error", "error_type": type(e).__name__, "component": "resume_service"},
+        )
         return False
 
 

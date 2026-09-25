@@ -18,6 +18,9 @@ import hashlib
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any, Set
 from fastapi import HTTPException, status
+from app.core.logging import get_logger
+
+logger = get_logger("app.services.career_roadmap")
 
 from app.core.auth import AuthenticatedUser
 from app.schemas.career_roadmap import (
@@ -195,7 +198,10 @@ class CareerRoadmapService:
                     except Exception:
                         pass
         except Exception as e:
-            print(f"Warning: Failed to list roadmaps for user {user.uid}: {e}")
+            logger.warning(
+                f"Failed to list roadmaps: {str(e)}",
+                extra={"event": "firestore_read_error", "error_type": type(e).__name__, "component": "career_roadmap_service"},
+            )
 
         return ListRoadmapsResponse(
             roadmaps=roadmaps,
@@ -999,5 +1005,8 @@ class CareerRoadmapService:
             res = await client.patch(doc_url, headers=headers, json=fields_body)
             return res.status_code in (200, 201)
         except Exception as e:
-            print(f"Error saving roadmap doc: {e}")
+            logger.error(
+                f"Error saving roadmap doc: {str(e)}",
+                extra={"event": "firestore_write_error", "error_type": type(e).__name__, "component": "career_roadmap_service"},
+            )
             return False

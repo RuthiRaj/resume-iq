@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getOrCreateRequestId, forwardHeaders, createProxyResponse } from "@/lib/server-request-utils";
 
 const BACKEND_API_URL =
   process.env.BACKEND_API_URL ||
@@ -6,13 +7,15 @@ const BACKEND_API_URL =
   "http://localhost:8000";
 
 export async function GET(req: NextRequest) {
+  const reqId = getOrCreateRequestId(req);
   const authHeader =
     req.headers.get("Authorization") || req.headers.get("authorization");
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json(
+    return createProxyResponse(
       { error: "Missing or invalid Authorization header." },
-      { status: 401 }
+      401,
+      reqId
     );
   }
 
@@ -25,29 +28,30 @@ export async function GET(req: NextRequest) {
   try {
     const backendResponse = await fetch(targetUrl, {
       method: "GET",
-      headers: {
-        Authorization: authHeader,
-      },
+      headers: forwardHeaders(req),
     });
 
     const data = await backendResponse.json();
-    return NextResponse.json(data, { status: backendResponse.status });
+    return createProxyResponse(data, backendResponse.status, reqId);
   } catch {
-    return NextResponse.json(
+    return createProxyResponse(
       { error: "Career Roadmap backend service is unreachable." },
-      { status: 503 }
+      503,
+      reqId
     );
   }
 }
 
 export async function POST(req: NextRequest) {
+  const reqId = getOrCreateRequestId(req);
   const authHeader =
     req.headers.get("Authorization") || req.headers.get("authorization");
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return NextResponse.json(
+    return createProxyResponse(
       { error: "Missing or invalid Authorization header." },
-      { status: 401 }
+      401,
+      reqId
     );
   }
 
@@ -55,9 +59,10 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return createProxyResponse(
       { error: "Invalid JSON payload." },
-      { status: 400 }
+      400,
+      reqId
     );
   }
 
@@ -66,19 +71,17 @@ export async function POST(req: NextRequest) {
   try {
     const backendResponse = await fetch(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: authHeader,
-      },
+      headers: forwardHeaders(req, { "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
 
     const data = await backendResponse.json();
-    return NextResponse.json(data, { status: backendResponse.status });
+    return createProxyResponse(data, backendResponse.status, reqId);
   } catch {
-    return NextResponse.json(
+    return createProxyResponse(
       { error: "Career Roadmap synthesis backend service is unreachable." },
-      { status: 503 }
+      503,
+      reqId
     );
   }
 }
