@@ -38,7 +38,7 @@ jobs:
           ENVIRONMENT: test
           AI_ANALYZER_PROVIDER: groq
         run: |
-          python -m pytest -v
+          python -m pytest -c pytest.ini -v
 
   frontend-check:
     name: Frontend Typecheck, Lint & Build
