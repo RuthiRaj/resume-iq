@@ -663,7 +663,11 @@ class CareerRoadmapService:
             createdAt=now_iso,
             lifecycle=roadmap.lifecycle,
         )
-        roadmap.history_snapshots.append(snapshot_record)
+        updated_history = list(roadmap.history_snapshots)
+        updated_history.append(snapshot_record)
+        # Bounded retention: Keep at most 10 most recent historical snapshots to avoid Firestore 1MB document limit
+        if len(updated_history) > 10:
+            updated_history = updated_history[-10:]
 
         # 2. Count Preserved Historical Milestones
         completed_preserved = sum(
@@ -673,6 +677,7 @@ class CareerRoadmapService:
         # 3. Perform Live Reconciliation against Master Workspace
         reconcile_res = await cls.reconcile_roadmap(user, roadmap_id)
         roadmap = reconcile_res.updated_plan
+        roadmap.history_snapshots = updated_history
 
         remaining_reconciled = len(roadmap.milestones) - completed_preserved
         prev_v = roadmap.version

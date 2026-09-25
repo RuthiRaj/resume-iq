@@ -48,6 +48,8 @@ export function LoadingState({
 }) {
   return (
     <div
+      role="status"
+      aria-live="polite"
       className={cn(
         "flex flex-col items-center justify-center rounded-card border border-border bg-surface p-12 text-center",
         className
@@ -55,6 +57,7 @@ export function LoadingState({
     >
       <Loader2 className="h-6 w-6 animate-spin text-accent" />
       <p className="mt-3 text-small text-secondary">{text}</p>
+      <span className="sr-only">Loading in progress</span>
     </div>
   );
 }
@@ -72,6 +75,8 @@ export function ErrorAlert({
 }) {
   return (
     <div
+      role="alert"
+      aria-live="assertive"
       className={cn(
         "flex items-start justify-between rounded-btn border border-status-error/30 bg-status-error-soft p-4 text-status-error",
         className
