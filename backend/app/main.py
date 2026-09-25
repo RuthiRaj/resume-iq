@@ -32,6 +32,9 @@ logger = get_logger("app.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Production Startup Preflight Configuration Validation
+    settings.validate_production_preflight()
+
     # Application Startup
     logger.info(
         "Starting ResumeIQ AI Backend Engine",

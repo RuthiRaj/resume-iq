@@ -67,5 +67,53 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    def validate_production_preflight(self) -> None:
+        """
+        Validates critical configuration when running in production mode.
+        Fails fast at startup with actionable error messages without exposing secret values.
+        Preserves development and test defaults when ENVIRONMENT != 'production'.
+        """
+        if self.ENVIRONMENT.lower() != "production":
+            return
+
+        errors: List[str] = []
+
+        if not self.FIREBASE_PROJECT_ID or not self.FIREBASE_PROJECT_ID.strip():
+            errors.append("FIREBASE_PROJECT_ID must be set in production.")
+
+        if not self.AI_PROVIDER_CHAIN or not self.AI_PROVIDER_CHAIN.strip():
+            errors.append("AI_PROVIDER_CHAIN must be configured in production.")
+        else:
+            configured_providers = [p.strip().lower() for p in self.AI_PROVIDER_CHAIN.split(",") if p.strip()]
+            valid_providers = {"groq", "gemini", "nvidia"}
+            unknown = [p for p in configured_providers if p not in valid_providers]
+            if unknown:
+                errors.append(f"AI_PROVIDER_CHAIN contains invalid provider(s): {', '.join(unknown)}")
+
+            # In production, at least one provider in the chain must have an API key configured
+            has_valid_key = False
+            for p in configured_providers:
+                if p == "groq" and self.GROQ_API_KEY and len(self.GROQ_API_KEY.strip()) > 5:
+                    has_valid_key = True
+                elif p == "gemini" and self.GEMINI_API_KEY and len(self.GEMINI_API_KEY.strip()) > 5:
+                    has_valid_key = True
+                elif p == "nvidia" and self.NVIDIA_API_KEY and len(self.NVIDIA_API_KEY.strip()) > 5:
+                    has_valid_key = True
+
+            if not has_valid_key:
+                errors.append(
+                    "At least one AI provider in AI_PROVIDER_CHAIN must have a valid API key configured "
+                    "(GROQ_API_KEY, GEMINI_API_KEY, or NVIDIA_API_KEY)."
+                )
+
+        if not self.CORS_ORIGINS:
+            errors.append("CORS_ORIGINS must not be empty in production.")
+        elif "*" in self.CORS_ORIGINS and len(self.CORS_ORIGINS) == 1:
+            errors.append("Wildcard CORS_ORIGINS ['*'] is not permitted in production with allow_credentials=True.")
+
+        if errors:
+            joined_errors = "; ".join(errors)
+            raise RuntimeError(f"Production configuration preflight failed: {joined_errors}")
+
 
 settings = Settings()

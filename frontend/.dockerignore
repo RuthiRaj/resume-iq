@@ -1,0 +1,29 @@
+# =====================================================================
+# ResumeIQ Frontend Docker Build Ignore File
+# =====================================================================
+
+.git
+.gitignore
+.dockerignore
+Dockerfile
+
+# Secrets and Environment Files
+.env
+.env.*
+.env.local
+*.pem
+*.key
+
+# Local Build Artifacts & Dependencies
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+
+# Logs, Test & E2E Artifacts
+*.log
+test-results/
+playwright-report/
+e2e/

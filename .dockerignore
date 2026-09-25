@@ -1,0 +1,75 @@
+# =====================================================================
+# ResumeIQ Root Docker Build Ignore File
+# Prevents local dependencies, secrets, tests, and temporary artifacts
+# from entering Docker build contexts.
+# =====================================================================
+
+.git
+.gitignore
+.github
+.dockerignore
+docker-compose*.yml
+docker-compose*.yaml
+DOCKER.md
+README*.md
+*.md
+
+# Environment and Secret Files (NEVER bake into image layers)
+.env
+.env.*
+.env.local
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+service-account*.json
+firebase-credentials*.json
+
+# Python Artifacts & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+backend/.venv/
+venv/
+backend/venv/
+.pytest_cache/
+backend/.pytest_cache/
+.ruff_cache/
+backend/.ruff_cache/
+.coverage
+htmlcov/
+pytest_full_output.txt
+
+# Node & Next.js Build Artifacts
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+dist/
+build/
+*.tsbuildinfo
+
+# Logs & Archives
+*.log
+*.log.*
+*.zip
+*.tar.gz
+
+# Testing, E2E & Evaluation Artifacts
+test-results/
+frontend/test-results/
+playwright-report/
+frontend/playwright-report/
+scratch/
+evaluation/
+*report*.json
+
+# IDE & OS Metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
