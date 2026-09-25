@@ -14,6 +14,9 @@ import {
   getRoadmap,
   updateMilestoneProgress,
   promoteMilestoneToEvidenceDraft,
+  reconcileRoadmap,
+  refreshRoadmap,
+  updateRoadmapLifecycle,
 } from "@/lib/career-roadmap-api";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,6 +41,12 @@ import {
   Award,
   AlertCircle,
   ExternalLink,
+  RefreshCw,
+  FileCheck2,
+  Archive,
+  ArchiveRestore,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function CareerRoadmapDetailPage() {
@@ -48,6 +57,9 @@ export default function CareerRoadmapDetailPage() {
 
   const [roadmap, setRoadmap] = useState<RoadmapPlan | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isReconciling, setIsReconciling] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
@@ -159,6 +171,65 @@ export default function CareerRoadmapDetailPage() {
     }
   };
 
+  const handleReconcile = async () => {
+    if (!user || !roadmap) return;
+    setIsReconciling(true);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await reconcileRoadmap(idToken, roadmap.roadmapId);
+      setRoadmap(res.updatedPlan);
+      showToast(
+        `Reconciliation complete: ${res.groundedCount} grounded, ${res.notGroundedCount} remaining.`,
+        "success"
+      );
+    } catch (err: any) {
+      showToast(err.message || "Failed to reconcile roadmap.", "error");
+    } finally {
+      setIsReconciling(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (!user || !roadmap) return;
+    setIsRefreshing(true);
+
+    try {
+      const idToken = await user.getIdToken();
+      const res = await refreshRoadmap(idToken, roadmap.roadmapId, {
+        expectedVersion: roadmap.version,
+      });
+      setRoadmap(res.updatedPlan);
+      showToast(
+        `Roadmap refreshed! Preserved ${res.completedMilestonesPreserved} completed milestones.`,
+        "success"
+      );
+    } catch (err: any) {
+      showToast(err.message || "Failed to refresh roadmap.", "error");
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleArchiveRoadmap = async () => {
+    if (!user || !roadmap) return;
+    setIsArchiving(true);
+
+    try {
+      const idToken = await user.getIdToken();
+      const updated = await updateRoadmapLifecycle(idToken, roadmap.roadmapId, {
+        lifecycle: "ARCHIVED",
+        expectedVersion: roadmap.version,
+      });
+      setRoadmap(updated);
+      showToast("Roadmap archived. Progression is now read-only.", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to archive roadmap.", "error");
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   if (isLoading) {
     return <LoadingState text="Loading career capability roadmap..." />;
   }
@@ -176,6 +247,8 @@ export default function CareerRoadmapDetailPage() {
       </div>
     );
   }
+
+  const isReadOnly = roadmap.lifecycle === "ARCHIVED" || roadmap.lifecycle === "COMPLETED";
 
   return (
     <div className="space-y-6">
@@ -204,13 +277,95 @@ export default function CareerRoadmapDetailPage() {
                   {roadmap.targetCompany}
                 </Badge>
               )}
+              {/* Lifecycle Badge */}
+              <Badge
+                variant="outline"
+                className={
+                  roadmap.lifecycle === "COMPLETED"
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    : roadmap.lifecycle === "ARCHIVED"
+                    ? "bg-slate-800 text-slate-400 border-slate-700"
+                    : "bg-blue-500/10 text-blue-400 border-blue-500/30"
+                }
+              >
+                {roadmap.lifecycle}
+              </Badge>
             </div>
             <p className="text-small text-secondary mt-1">
               Deterministic capability progression DAG grounded in your candidate evidence and target role requirements.
             </p>
           </div>
+
+          {/* Top Actions: Reconcile, Refresh, Archive */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleReconcile}
+              disabled={isReconciling || isRefreshing}
+              className="gap-1.5 text-small"
+            >
+              {isReconciling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <FileCheck2 className="h-3.5 w-3.5 text-accent" />
+              )}
+              <span>Reconcile Evidence</span>
+            </Button>
+
+            {roadmap.lifecycle !== "ARCHIVED" && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRefresh}
+                disabled={isRefreshing || isReconciling}
+                className="gap-1.5 text-small"
+              >
+                {isRefreshing ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5 text-emerald-400" />
+                )}
+                <span>Refresh Analysis</span>
+              </Button>
+            )}
+
+            {roadmap.lifecycle !== "ARCHIVED" && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleArchiveRoadmap}
+                disabled={isArchiving}
+                className="gap-1.5 text-small text-secondary hover:text-primary"
+              >
+                <Archive className="h-3.5 w-3.5" />
+                <span>Archive</span>
+              </Button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Stale Evidence Banner */}
+      {roadmap.isStale && roadmap.lifecycle === "ACTIVE" && (
+        <div className="flex items-center justify-between gap-3 rounded-card border border-amber-500/30 bg-amber-500/10 p-3.5 text-small text-amber-300">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+            <span>
+              <strong>Workspace Evidence Changed:</strong> Your Master Workspace has new evidence since this roadmap was last analyzed.
+            </span>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="h-7 text-[11px] border-amber-500/40 text-amber-200 hover:bg-amber-500/20"
+          >
+            Refresh Now
+          </Button>
+        </div>
+      )}
 
       {/* Overview Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -270,7 +425,7 @@ export default function CareerRoadmapDetailPage() {
       </div>
 
       {/* Next Recommended Milestone Banner */}
-      {roadmap.nextRecommendedMilestoneId && roadmap.overallProgressPct < 100 && (
+      {roadmap.nextRecommendedMilestoneId && roadmap.overallProgressPct < 100 && !isReadOnly && (
         <div className="flex items-center gap-3 rounded-card border border-accent/40 bg-accent-soft/30 p-4 text-small">
           <Sparkles className="h-5 w-5 text-accent shrink-0" />
           <div className="flex-1">
@@ -298,6 +453,7 @@ export default function CareerRoadmapDetailPage() {
               key={milestone.milestoneId}
               milestone={milestone}
               roadmapVersion={roadmap.version}
+              roadmapLifecycle={roadmap.lifecycle}
               allMilestones={roadmap.milestones}
               isNextRecommended={milestone.milestoneId === roadmap.nextRecommendedMilestoneId}
               onUpdateState={handleUpdateState}

@@ -28,6 +28,7 @@ from app.schemas.career_roadmap import (
     RoadmapPlan,
     RoadmapMilestone,
     RoadmapProvenance,
+    RoadmapSnapshotRecord,
     TargetImportanceBreakdown,
     MilestoneCategory,
 )
@@ -42,6 +43,57 @@ class RoadmapGenerator:
     Generates actionable, step-by-step milestone DAGs to bridge verified candidate skills
     to target job requirements.
     """
+
+    @classmethod
+    def compute_workspace_evidence_hash(cls, candidate_evidence: CandidateEvidence) -> str:
+        """
+        Computes a deterministic canonical SHA-256 hash of the candidate's Master Workspace evidence.
+        Canonicalizes experiences, projects, skills, certifications, and education.
+        Never hashes timestamps or random IDs.
+        """
+        canonical_items = {
+            "experiences": sorted([
+                {
+                    "company": (exp.company or "").strip().lower(),
+                    "role": (exp.role or "").strip().lower(),
+                    "bullets": sorted([b.strip() for b in (exp.bullets or []) if b and b.strip()]),
+                    "technologies": sorted([t.strip().lower() for t in (exp.technologies or []) if t and t.strip()]),
+                }
+                for exp in (candidate_evidence.experience or [])
+            ], key=lambda x: (x["company"], x["role"])),
+            "projects": sorted([
+                {
+                    "title": (proj.title or "").strip().lower(),
+                    "description": (proj.description or "").strip().lower(),
+                    "highlights": sorted([h.strip() for h in (proj.highlights or []) if h and h.strip()]),
+                    "tech_stack": sorted([t.strip().lower() for t in (proj.tech_stack or []) if t and t.strip()]),
+                }
+                for proj in (candidate_evidence.projects or [])
+            ], key=lambda x: x["title"]),
+            "skills": sorted(list(set([
+                normalize_skill_name(s.name).lower()
+                for s in (candidate_evidence.skills or [])
+                if s.name and s.name.strip()
+            ]))),
+            "certifications": sorted([
+                {
+                    "title": (getattr(cert, "title", None) or getattr(cert, "name", None) or "").strip().lower(),
+                    "issuer": (cert.issuer or "").strip().lower(),
+                }
+                for cert in (candidate_evidence.certifications or [])
+                if (getattr(cert, "title", None) or getattr(cert, "name", None) or "").strip()
+            ], key=lambda x: x["title"]),
+            "education": sorted([
+                {
+                    "institution": (edu.institution or "").strip().lower(),
+                    "degree": (edu.degree or "").strip().lower(),
+                }
+                for edu in (candidate_evidence.education or [])
+                if edu.institution and edu.degree
+            ], key=lambda x: (x["institution"], x["degree"])),
+        }
+        serialized = json.dumps(canonical_items, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     @classmethod
     def validate_milestone_dag(cls, milestones: List[RoadmapMilestone]) -> None:
@@ -327,6 +379,20 @@ class RoadmapGenerator:
         )
 
         title = f"Career Roadmap: {target_role}" + (f" @ {target_company}" if target_company else "")
+        evidence_hash = cls.compute_workspace_evidence_hash(candidate_evidence)
+
+        initial_snapshot = RoadmapSnapshotRecord(
+            snapshotId=f"snp_{uuid.uuid4().hex[:10]}",
+            version=1,
+            workspaceEvidenceHash=evidence_hash,
+            targetRole=target_role,
+            targetCompany=target_company or "",
+            milestoneCount=len(milestones),
+            completedMilestones=0,
+            overallProgressPct=0,
+            createdAt=now_iso,
+            lifecycle="ACTIVE",
+        )
 
         return RoadmapPlan(
             roadmapId=roadmap_id,
@@ -337,6 +403,10 @@ class RoadmapGenerator:
             targetLevel="",
             sourceVariantId=source_variant_id,
             version=1,
+            lifecycle="ACTIVE",
+            workspaceEvidenceHash=evidence_hash,
+            isStale=False,
+            reconciledAt=now_iso,
             totalMilestones=len(milestones),
             completedMilestones=0,
             overallProgressPct=0,
@@ -344,6 +414,7 @@ class RoadmapGenerator:
             targetImportanceBreakdown=importance_breakdown,
             nextRecommendedMilestoneId=next_rec_id,
             milestones=milestones,
+            historySnapshots=[initial_snapshot],
             provenance=provenance,
             createdAt=now_iso,
             updatedAt=now_iso,

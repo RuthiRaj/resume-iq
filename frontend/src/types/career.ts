@@ -136,6 +136,27 @@ export interface VerificationArtifactInput {
   checklistCompleted?: string[];
 }
 
+export type RoadmapLifecycle =
+  | "ACTIVE"
+  | "COMPLETED"
+  | "ARCHIVED";
+
+export type ReconciliationStatus =
+  | "NOT_GROUNDED"
+  | "GROUNDED_BY_WORKSPACE"
+  | "GROUNDED_BY_PROMOTED_PROJECT"
+  | "RELATED_UNVERIFIED";
+
+export interface MilestoneReconciliation {
+  status: ReconciliationStatus;
+  matchedEvidenceId?: string;
+  matchedEvidenceTitle?: string;
+  matchedEvidenceSection?: string;
+  reconciliationNotes: string;
+  promotedProjectId?: string;
+  reconciledAt: string;
+}
+
 export interface RoadmapMilestone {
   milestoneId: string;
   orderIndex: number;
@@ -154,6 +175,9 @@ export interface RoadmapMilestone {
   bridgeDetails?: TransferableSkillBridge;
   state: MilestoneState;
   verificationArtifact?: VerificationArtifact;
+  promotedProjectId?: string;
+  workspaceEvidenceIds?: string[];
+  reconciliation?: MilestoneReconciliation;
   startedAt?: string;
   completedAt?: string;
 }
@@ -166,6 +190,19 @@ export interface RoadmapProvenance {
   provenanceHash: string;
 }
 
+export interface RoadmapSnapshotRecord {
+  snapshotId: string;
+  version: number;
+  workspaceEvidenceHash: string;
+  targetRole: string;
+  targetCompany?: string;
+  milestoneCount: number;
+  completedMilestones: number;
+  overallProgressPct: number;
+  createdAt: string;
+  lifecycle: RoadmapLifecycle;
+}
+
 export interface RoadmapPlan {
   roadmapId: string;
   userId: string;
@@ -175,6 +212,10 @@ export interface RoadmapPlan {
   targetLevel?: string;
   sourceVariantId?: string;
   version: number;
+  lifecycle: RoadmapLifecycle;
+  workspaceEvidenceHash?: string;
+  isStale?: boolean;
+  reconciledAt?: string;
   totalMilestones: number;
   completedMilestones: number;
   overallProgressPct: number;
@@ -182,6 +223,7 @@ export interface RoadmapPlan {
   targetImportanceBreakdown: TargetImportanceBreakdown;
   nextRecommendedMilestoneId?: string;
   milestones: RoadmapMilestone[];
+  historySnapshots?: RoadmapSnapshotRecord[];
   provenance?: RoadmapProvenance;
   createdAt: string;
   updatedAt: string;
@@ -200,6 +242,38 @@ export interface UpdateMilestoneProgressRequest {
   expectedVersion: number;
   artifact?: VerificationArtifactInput;
   attestation?: CandidateAttestationRequest;
+}
+
+export interface ReconcileRoadmapResponse {
+  roadmapId: string;
+  reconciledAt: string;
+  isStale: boolean;
+  groundedCount: number;
+  unverifiedCount: number;
+  notGroundedCount: number;
+  lifecycle: RoadmapLifecycle;
+  updatedPlan: RoadmapPlan;
+}
+
+export interface RefreshRoadmapRequest {
+  expectedVersion: number;
+}
+
+export interface RefreshRoadmapResponse {
+  roadmapId: string;
+  refreshedAt: string;
+  previousVersion: number;
+  newVersion: number;
+  isStale: boolean;
+  completedMilestonesPreserved: number;
+  remainingMilestonesReconciled: number;
+  lifecycle: RoadmapLifecycle;
+  updatedPlan: RoadmapPlan;
+}
+
+export interface UpdateRoadmapLifecycleRequest {
+  lifecycle: RoadmapLifecycle;
+  expectedVersion: number;
 }
 
 export interface ListRoadmapsResponse {

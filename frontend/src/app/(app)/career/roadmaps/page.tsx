@@ -171,32 +171,56 @@ export default function CareerRoadmapsPage() {
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {roadmaps.map((rm) => (
-            <Card key={rm.roadmapId} className="flex flex-col justify-between hover:border-accent/40 transition-all">
-              <CardHeader className="p-5 pb-3 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <Badge variant="outline" className="bg-accent-soft text-accent border-accent/30 font-medium">
-                    {rm.targetRole}
-                  </Badge>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 w-7 p-0 text-muted hover:text-status-error"
-                    onClick={() => setItemToDelete({ id: rm.roadmapId, title: rm.title })}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-                <CardTitle className="text-body font-semibold text-primary line-clamp-2">
-                  {rm.title}
-                </CardTitle>
-                {rm.targetCompany && (
-                  <div className="flex items-center gap-1.5 text-caption text-secondary">
-                    <Building2 className="h-3.5 w-3.5 text-muted" />
-                    <span>{rm.targetCompany}</span>
+          {roadmaps.map((rm) => {
+            const isCompleted = rm.lifecycle === "COMPLETED";
+            const isArchived = rm.lifecycle === "ARCHIVED";
+            return (
+              <Card key={rm.roadmapId} className="flex flex-col justify-between hover:border-accent/40 transition-all">
+                <CardHeader className="p-5 pb-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Badge variant="outline" className="bg-accent-soft text-accent border-accent/30 font-medium">
+                        {rm.targetRole}
+                      </Badge>
+                      {rm.lifecycle && (
+                        <Badge
+                          variant="outline"
+                          className={
+                            isCompleted
+                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 font-medium text-[10px]"
+                              : isArchived
+                              ? "bg-muted/10 text-muted border-muted/30 font-medium text-[10px]"
+                              : "bg-blue-500/10 text-blue-400 border-blue-500/30 font-medium text-[10px]"
+                          }
+                        >
+                          {rm.lifecycle}
+                        </Badge>
+                      )}
+                      {rm.isStale && (
+                        <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 font-medium text-[10px]">
+                          STALE
+                        </Badge>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 text-muted hover:text-status-error"
+                      onClick={() => setItemToDelete({ id: rm.roadmapId, title: rm.title })}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
                   </div>
-                )}
-              </CardHeader>
+                  <CardTitle className="text-body font-semibold text-primary line-clamp-2">
+                    {rm.title}
+                  </CardTitle>
+                  {rm.targetCompany && (
+                    <div className="flex items-center gap-1.5 text-caption text-secondary">
+                      <Building2 className="h-3.5 w-3.5 text-muted" />
+                      <span>{rm.targetCompany}</span>
+                    </div>
+                  )}
+                </CardHeader>
 
               <CardContent className="p-5 pt-0 space-y-4">
                 {/* Progress Bar */}
@@ -236,7 +260,8 @@ export default function CareerRoadmapsPage() {
                 </Link>
               </CardContent>
             </Card>
-          ))}
+          );
+        })}
         </div>
       )}
 

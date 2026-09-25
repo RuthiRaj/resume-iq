@@ -408,4 +408,141 @@ test.describe("Phase 5.1 Milestone 4 — Career Roadmap & Evidence Promotion E2E
       page.getByRole("button", { name: "Promote to Evidence Draft" })
     ).toBeVisible();
   });
+
+  test("10. Live workspace evidence reconciliation updates status badges", async ({
+    page,
+  }) => {
+    // Mock reconcile POST
+    await page.route(
+      "**/api/career/roadmaps/rm_e2e_test_123/reconcile",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            roadmapId: "rm_e2e_test_123",
+            reconciledAt: "2026-09-25T14:00:00Z",
+            isStale: false,
+            groundedCount: 2,
+            unverifiedCount: 1,
+            notGroundedCount: 0,
+            lifecycle: "ACTIVE",
+            updatedPlan: {
+              ...mockRoadmapPlan,
+              reconciledAt: "2026-09-25T14:00:00Z",
+              milestones: mockRoadmapPlan.milestones.map((m) =>
+                m.milestoneId === "ms_proj_002"
+                  ? {
+                      ...m,
+                      reconciliation: {
+                        status: "GROUNDED_BY_PROMOTED_PROJECT",
+                        matchedEvidenceId: "proj_ms_proj_002",
+                        matchedEvidenceTitle: "Multi-Region Distributed Gateway Engine",
+                        matchedEvidenceSection: "Project",
+                        reconciliationNotes: "Grounded by verified roadmap project.",
+                        reconciledAt: "2026-09-25T14:00:00Z",
+                      },
+                    }
+                  : m
+              ),
+            },
+          }),
+        });
+      }
+    );
+
+    await page.goto("/career/roadmaps/rm_e2e_test_123");
+
+    // Click Reconcile Evidence button
+    const reconcileBtn = page.getByRole("button", { name: /Reconcile Evidence/ });
+    await expect(reconcileBtn).toBeVisible();
+    await reconcileBtn.click();
+
+    // Verify toast or banner
+    await expect(page.getByText(/Workspace evidence reconciled/i)).toBeVisible();
+  });
+
+  test("11. Stale evidence banner allows one-click roadmap refresh", async ({
+    page,
+  }) => {
+    // Override roadmap GET to return isStale: true
+    await page.route("**/api/career/roadmaps/rm_e2e_test_123", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...mockRoadmapPlan,
+            isStale: true,
+          }),
+        });
+      }
+    });
+
+    // Mock refresh POST
+    await page.route(
+      "**/api/career/roadmaps/rm_e2e_test_123/refresh",
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            roadmapId: "rm_e2e_test_123",
+            refreshedAt: "2026-09-25T14:30:00Z",
+            previousVersion: 3,
+            newVersion: 4,
+            isStale: false,
+            completedMilestonesPreserved: 1,
+            remainingMilestonesReconciled: 2,
+            lifecycle: "ACTIVE",
+            updatedPlan: {
+              ...mockRoadmapPlan,
+              version: 4,
+              isStale: false,
+            },
+          }),
+        });
+      }
+    );
+
+    await page.goto("/career/roadmaps/rm_e2e_test_123");
+
+    // Check Stale Evidence banner is displayed
+    await expect(page.getByText("Workspace Evidence Updated")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Refresh Roadmap Now" })).toBeVisible();
+
+    // Click Refresh
+    await page.getByRole("button", { name: "Refresh Roadmap Now" }).click();
+    await expect(page.getByText(/Roadmap refreshed against workspace evidence/i)).toBeVisible();
+  });
+
+  test("12. Multi-roadmap lifecycle management supports archiving and restoring", async ({
+    page,
+  }) => {
+    // Mock lifecycle PATCH
+    await page.route(
+      "**/api/career/roadmaps/rm_e2e_test_123/lifecycle",
+      async (route) => {
+        const reqBody = JSON.parse(route.request().postData() || "{}");
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...mockRoadmapPlan,
+            version: mockRoadmapPlan.version + 1,
+            lifecycle: reqBody.lifecycle,
+          }),
+        });
+      }
+    );
+
+    await page.goto("/career/roadmaps/rm_e2e_test_123");
+
+    // Click Archive Roadmap
+    const archiveBtn = page.getByRole("button", { name: "Archive Roadmap" });
+    await expect(archiveBtn).toBeVisible();
+    await archiveBtn.click();
+
+    await expect(page.getByText(/Roadmap archived/i)).toBeVisible();
+  });
 });

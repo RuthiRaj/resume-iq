@@ -1,13 +1,15 @@
 """
-Pydantic v2 Schemas for Career Roadmap Engine (Phase 5.1 — Milestone 2)
+Pydantic v2 Schemas for Career Roadmap Engine (Phase 5.1 — Milestone 5)
 
 Defines strongly-typed contracts for:
 - Progressive capability roadmap plans (RoadmapPlan)
 - Grounded milestones with explicit DAG dependency IDs (RoadmapMilestone)
 - Deterministic progress state machine (MilestoneState)
 - Auditable verification artifacts (VerificationArtifact)
-- Plan-level time, priority, and next-recommended-milestone aggregates
-- Milestone progression and roadmap API contracts
+- Multi-roadmap lifecycle (RoadmapLifecycle: ACTIVE, COMPLETED, ARCHIVED)
+- Live Workspace Evidence Reconciliation (MilestoneReconciliation, ReconciliationStatus)
+- Historical roadmap snapshots & evidence hashing (RoadmapSnapshotRecord)
+- Reconcile and Refresh API contracts
 """
 
 from typing import List, Optional, Literal, Dict, Any
@@ -39,6 +41,19 @@ ArtifactType = Literal[
     "DeploymentUrl",
     "TechnicalWriteup",
     "AttestationRecord",
+]
+
+RoadmapLifecycle = Literal[
+    "ACTIVE",
+    "COMPLETED",
+    "ARCHIVED",
+]
+
+ReconciliationStatus = Literal[
+    "NOT_GROUNDED",
+    "GROUNDED_BY_WORKSPACE",
+    "GROUNDED_BY_PROMOTED_PROJECT",
+    "RELATED_UNVERIFIED",
 ]
 
 
@@ -73,10 +88,24 @@ class VerificationArtifactInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
+class MilestoneReconciliation(BaseModel):
+    """Authoritative result of reconciling a roadmap milestone with current Master Workspace evidence."""
+    status: ReconciliationStatus
+    matched_evidence_id: Optional[str] = Field(default=None, alias="matchedEvidenceId")
+    matched_evidence_title: Optional[str] = Field(default=None, alias="matchedEvidenceTitle")
+    matched_evidence_section: Optional[str] = Field(default=None, alias="matchedEvidenceSection")
+    reconciliation_notes: str = Field(default="", alias="reconciliationNotes")
+    promoted_project_id: Optional[str] = Field(default=None, alias="promotedProjectId")
+    reconciled_at: str = Field(..., alias="reconciledAt")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
 class RoadmapMilestone(BaseModel):
     """
     A single grounded milestone within a career capability roadmap.
-    Traceable to prerequisite evidence, target requirements, and DAG prerequisite milestones.
+    Traceable to prerequisite evidence, target requirements, DAG prerequisite milestones,
+    promoted workspace projects, and live workspace evidence.
     """
     milestone_id: str = Field(..., alias="milestoneId", description="Unique milestone ID (ms_...)")
     order_index: int = Field(..., ge=0, alias="orderIndex")
@@ -95,6 +124,9 @@ class RoadmapMilestone(BaseModel):
     bridge_details: Optional[TransferableSkillBridge] = Field(default=None, alias="bridgeDetails")
     state: MilestoneState = Field(default="NOT_STARTED")
     verification_artifact: Optional[VerificationArtifact] = Field(default=None, alias="verificationArtifact")
+    promoted_project_id: Optional[str] = Field(default=None, alias="promotedProjectId")
+    workspace_evidence_ids: List[str] = Field(default_factory=list, alias="workspaceEvidenceIds")
+    reconciliation: Optional[MilestoneReconciliation] = None
     started_at: Optional[str] = Field(default=None, alias="startedAt")
     completed_at: Optional[str] = Field(default=None, alias="completedAt")
 
@@ -112,6 +144,22 @@ class RoadmapProvenance(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
 
+class RoadmapSnapshotRecord(BaseModel):
+    """Immutable historical snapshot record captured during generation or refresh."""
+    snapshot_id: str = Field(..., alias="snapshotId")
+    version: int
+    workspace_evidence_hash: str = Field(..., alias="workspaceEvidenceHash")
+    target_role: str = Field(..., alias="targetRole")
+    target_company: Optional[str] = Field(default="", alias="targetCompany")
+    milestone_count: int = Field(..., alias="milestoneCount")
+    completed_milestones: int = Field(..., alias="completedMilestones")
+    overall_progress_pct: int = Field(..., alias="overallProgressPct")
+    created_at: str = Field(..., alias="createdAt")
+    lifecycle: RoadmapLifecycle = "ACTIVE"
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
 class RoadmapPlan(BaseModel):
     """
     Persistent Career Roadmap Aggregate Document.
@@ -125,6 +173,10 @@ class RoadmapPlan(BaseModel):
     target_level: Optional[str] = Field(default="", alias="targetLevel")
     source_variant_id: Optional[str] = Field(default=None, alias="sourceVariantId")
     version: int = Field(default=1, ge=1)
+    lifecycle: RoadmapLifecycle = Field(default="ACTIVE")
+    workspace_evidence_hash: Optional[str] = Field(default=None, alias="workspaceEvidenceHash")
+    is_stale: bool = Field(default=False, alias="isStale")
+    reconciled_at: Optional[str] = Field(default=None, alias="reconciledAt")
     total_milestones: int = Field(default=0, alias="totalMilestones")
     completed_milestones: int = Field(default=0, alias="completedMilestones")
     overall_progress_pct: int = Field(default=0, ge=0, le=100, alias="overallProgressPct")
@@ -134,6 +186,7 @@ class RoadmapPlan(BaseModel):
     )
     next_recommended_milestone_id: Optional[str] = Field(default=None, alias="nextRecommendedMilestoneId")
     milestones: List[RoadmapMilestone] = Field(default_factory=list)
+    history_snapshots: List[RoadmapSnapshotRecord] = Field(default_factory=list, alias="historySnapshots")
     provenance: Optional[RoadmapProvenance] = None
     created_at: str = Field(..., alias="createdAt")
     updated_at: str = Field(..., alias="updatedAt")
@@ -159,6 +212,50 @@ class UpdateMilestoneProgressRequest(BaseModel):
     artifact: Optional[VerificationArtifactInput] = None
     attestation: Optional[CandidateAttestationRequest] = None
     notes: Optional[str] = Field(default=None, max_length=1000)
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class ReconcileRoadmapResponse(BaseModel):
+    """Response contract after deterministically reconciling roadmap milestones against Master Workspace."""
+    roadmap_id: str = Field(..., alias="roadmapId")
+    reconciled_at: str = Field(..., alias="reconciledAt")
+    is_stale: bool = Field(..., alias="isStale")
+    grounded_count: int = Field(default=0, alias="groundedCount")
+    unverified_count: int = Field(default=0, alias="unverifiedCount")
+    not_grounded_count: int = Field(default=0, alias="notGroundedCount")
+    lifecycle: RoadmapLifecycle
+    updated_plan: RoadmapPlan = Field(..., alias="updatedPlan")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class RefreshRoadmapRequest(BaseModel):
+    """Request contract for refreshing an active career roadmap against updated Master Workspace evidence."""
+    expected_version: int = Field(..., ge=1, alias="expectedVersion")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class RefreshRoadmapResponse(BaseModel):
+    """Response contract after re-evaluating remaining gaps and updating roadmap snapshots."""
+    roadmap_id: str = Field(..., alias="roadmapId")
+    refreshed_at: str = Field(..., alias="refreshedAt")
+    previous_version: int = Field(..., alias="previousVersion")
+    new_version: int = Field(..., alias="newVersion")
+    is_stale: bool = Field(..., alias="isStale")
+    completed_milestones_preserved: int = Field(..., alias="completedMilestonesPreserved")
+    remaining_milestones_reconciled: int = Field(..., alias="remainingMilestonesReconciled")
+    lifecycle: RoadmapLifecycle
+    updated_plan: RoadmapPlan = Field(..., alias="updatedPlan")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class UpdateRoadmapLifecycleRequest(BaseModel):
+    """Request contract for transitioning roadmap lifecycle (e.g. ARCHIVED / ACTIVE)."""
+    lifecycle: RoadmapLifecycle
+    expected_version: int = Field(..., ge=1, alias="expectedVersion")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
