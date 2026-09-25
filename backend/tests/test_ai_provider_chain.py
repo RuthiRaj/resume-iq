@@ -155,7 +155,7 @@ async def test_fallback_provider_order_success(monkeypatch):
 
     assert result.ats_score == 85
     assert result.metadata.provider == "mock_p2"
-    p1.analyze.assert_awaited_once()
+    assert p1.analyze.await_count == 2  # 1 initial + 1 bounded retry on transient 504 timeout
     p2.analyze.assert_awaited_once()
 
 

@@ -33,6 +33,7 @@ from app.ai.skills import (
 )
 from app.ai.grounding import reconcile_requirement_coverage
 from app.ai.remediation_engine import generate_remediation_suggestions
+from app.ai.resilience import repair_and_parse_json, ProviderResilienceError
 
 SYSTEM_INSTRUCTION = """You are a Senior Principal Technical Recruiter and ATS (Applicant Tracking System) Intelligence Engine.
 Your task is to analyze candidate resume evidence against a target Job Description in a SINGLE comprehensive pass:
@@ -329,21 +330,10 @@ class GroqAnalyzerProvider:
                 detail="AI provider returned an empty response.",
             )
 
-        clean_text = response_text.strip()
-        if clean_text.startswith("```"):
-            lines = clean_text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            clean_text = "\n".join(lines).strip()
-        first_brace = clean_text.find("{")
-        last_brace = clean_text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            clean_text = clean_text[first_brace : last_brace + 1]
-
         try:
-            return json.loads(clean_text)
+            return repair_and_parse_json(response_text)
+        except ProviderResilienceError as pre:
+            raise pre.to_http_exception()
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -429,7 +419,9 @@ class GroqAnalyzerProvider:
             )
 
         try:
-            parsed = json.loads(response_text)
+            parsed = repair_and_parse_json(response_text)
+        except ProviderResilienceError as pre:
+            raise pre.to_http_exception()
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

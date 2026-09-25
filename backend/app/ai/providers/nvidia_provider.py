@@ -24,6 +24,7 @@ from app.schemas.job_description import (
 )
 from app.schemas.requirement_match import RequirementMatch
 from app.ai.scoring import calculate_deterministic_ats_score
+from app.ai.resilience import repair_and_parse_json, ProviderResilienceError
 from app.ai.skills import (
     normalize_skill_name,
     normalize_and_deduplicate_skill_requirements,
@@ -364,21 +365,10 @@ class NvidiaAnalyzerProvider:
                 detail="AI provider returned an empty response.",
             )
 
-        clean_text = response_text.strip()
-        if clean_text.startswith("```"):
-            lines = clean_text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            clean_text = "\n".join(lines).strip()
-        first_brace = clean_text.find("{")
-        last_brace = clean_text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            clean_text = clean_text[first_brace : last_brace + 1]
-
         try:
-            return json.loads(clean_text)
+            return repair_and_parse_json(response_text)
+        except ProviderResilienceError as pre:
+            raise pre.to_http_exception()
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -501,22 +491,10 @@ class NvidiaAnalyzerProvider:
                 detail="AI provider returned an empty response.",
             )
 
-        # Extract JSON from markdown fences or text wrappers
-        clean_text = response_text.strip()
-        if clean_text.startswith("```"):
-            lines = clean_text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            clean_text = "\n".join(lines).strip()
-        first_brace = clean_text.find("{")
-        last_brace = clean_text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            clean_text = clean_text[first_brace : last_brace + 1]
-
         try:
-            parsed = json.loads(clean_text)
+            parsed = repair_and_parse_json(response_text)
+        except ProviderResilienceError as pre:
+            raise pre.to_http_exception()
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

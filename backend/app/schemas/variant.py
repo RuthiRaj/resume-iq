@@ -224,3 +224,22 @@ class ExportTargetedResumeResponse(BaseModel):
     exported_at: str = Field(..., alias="exportedAt")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+# --- 6. Generation Output Schema Contracts (Phase 4.0.6) ---
+
+class BulletRewriteItem(BaseModel):
+    item_id: str = Field(..., alias="itemId")
+    bullet_index: int = Field(..., ge=0, alias="bulletIndex")
+    original_bullet: str = Field(default="", alias="originalBullet")
+    rewritten_bullet: str = Field(default="", alias="rewrittenBullet")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+class ResumeGenerationOutput(BaseModel):
+    summary: Optional[str] = None
+    experience_rewrites: List[BulletRewriteItem] = Field(default_factory=list, alias="experienceRewrites")
+    project_rewrites: List[BulletRewriteItem] = Field(default_factory=list, alias="projectRewrites")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)

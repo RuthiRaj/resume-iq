@@ -19,6 +19,8 @@ from app.schemas.variant import (
     CreateTargetedVariantRequest,
     GenerateResumeRequest,
     ChangeRecord,
+    ResumeGenerationOutput,
+    BulletRewriteItem,
 )
 from app.schemas.plan import ResumePlan
 from app.services.resume_service import ResumeService
@@ -376,13 +378,21 @@ class ResumeGenerationService:
                 detail=f"Failed to generate resume tailoring: {e}",
             )
 
-        # 9. Validate and ground all generated rewrites
+        # 9. Validate output schema and ground all generated rewrites
         now_iso = datetime.now(timezone.utc).isoformat()
         change_ledger: List[ChangeRecord] = []
         candidate_skills = [s.name for s in candidate_evidence.skills]
 
+        try:
+            parsed_gen = ResumeGenerationOutput.model_validate(llm_output)
+        except Exception as ve:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"AI provider returned an invalid generation schema: {ve}",
+            )
+
         # Validate Summary with strict grounding (buzzwords, experience years, technologies)
-        raw_summary = (llm_output.get("summary") or "").strip()
+        raw_summary = (parsed_gen.summary or "").strip()
         final_summary = candidate_evidence.summary or candidate_evidence.headline or ""
         if raw_summary:
             val_summary = validate_summary_grounding(raw_summary, candidate_evidence)
@@ -391,27 +401,25 @@ class ResumeGenerationService:
 
         # Process Initial Experience Rewrites
         exp_rewrites_map: Dict[str, Dict[int, str]] = {}
-        for r in llm_output.get("experienceRewrites", []):
-            if isinstance(r, dict):
-                item_id = r.get("itemId")
-                b_idx = r.get("bulletIndex")
-                rewritten = (r.get("rewrittenBullet") or "").strip()
-                if item_id and b_idx is not None and rewritten:
-                    if item_id not in exp_rewrites_map:
-                        exp_rewrites_map[item_id] = {}
-                    exp_rewrites_map[item_id][int(b_idx)] = rewritten
+        for r in parsed_gen.experience_rewrites:
+            item_id = r.item_id
+            b_idx = r.bullet_index
+            rewritten = (r.rewritten_bullet or "").strip()
+            if item_id and b_idx is not None and rewritten:
+                if item_id not in exp_rewrites_map:
+                    exp_rewrites_map[item_id] = {}
+                exp_rewrites_map[item_id][int(b_idx)] = rewritten
 
         # Process Initial Project Rewrites
         proj_rewrites_map: Dict[str, Dict[int, str]] = {}
-        for r in llm_output.get("projectRewrites", []):
-            if isinstance(r, dict):
-                item_id = r.get("itemId")
-                b_idx = r.get("bulletIndex")
-                rewritten = (r.get("rewrittenBullet") or "").strip()
-                if item_id and b_idx is not None and rewritten:
-                    if item_id not in proj_rewrites_map:
-                        proj_rewrites_map[item_id] = {}
-                    proj_rewrites_map[item_id][int(b_idx)] = rewritten
+        for r in parsed_gen.project_rewrites:
+            item_id = r.item_id
+            b_idx = r.bullet_index
+            rewritten = (r.rewritten_bullet or "").strip()
+            if item_id and b_idx is not None and rewritten:
+                if item_id not in proj_rewrites_map:
+                    proj_rewrites_map[item_id] = {}
+                proj_rewrites_map[item_id][int(b_idx)] = rewritten
 
         # Pass 1 Grounding Validation: Identify valid and rejected rewrites
         final_bullet_map: Dict[str, Dict[int, str]] = {}
@@ -518,15 +526,18 @@ class ResumeGenerationService:
                     user_prompt=retry_user_prompt,
                     schema_hint=RETRY_SCHEMA_HINT,
                 )
-                retry_exp_map: Dict[str, Dict[int, str]] = {}
-                for r in retry_output.get("experienceRewrites", []):
-                    if isinstance(r, dict) and r.get("itemId") and r.get("bulletIndex") is not None:
-                        retry_exp_map.setdefault(r["itemId"], {})[int(r["bulletIndex"])] = (r.get("rewrittenBullet") or "").strip()
+                try:
+                    parsed_retry = ResumeGenerationOutput.model_validate(retry_output)
+                    retry_exp_map: Dict[str, Dict[int, str]] = {}
+                    for r in parsed_retry.experience_rewrites:
+                        retry_exp_map.setdefault(r.item_id, {})[r.bullet_index] = (r.rewritten_bullet or "").strip()
 
-                retry_proj_map: Dict[str, Dict[int, str]] = {}
-                for r in retry_output.get("projectRewrites", []):
-                    if isinstance(r, dict) and r.get("itemId") and r.get("bulletIndex") is not None:
-                        retry_proj_map.setdefault(r["itemId"], {})[int(r["bulletIndex"])] = (r.get("rewrittenBullet") or "").strip()
+                    retry_proj_map: Dict[str, Dict[int, str]] = {}
+                    for r in parsed_retry.project_rewrites:
+                        retry_proj_map.setdefault(r.item_id, {})[r.bullet_index] = (r.rewritten_bullet or "").strip()
+                except Exception:
+                    retry_exp_map = {}
+                    retry_proj_map = {}
 
                 for rej in rejected_for_retry:
                     i_id = rej["itemId"]
@@ -647,6 +658,12 @@ class ResumeGenerationService:
             resolved_model = m_name if isinstance(m_name, str) else "unknown"
 
         failover_log = getattr(active_provider, "failover_log", [])
+        raw_events = getattr(active_provider, "execution_events", [])
+        execution_events = [
+            e.model_dump() if hasattr(e, "model_dump") else e
+            for e in raw_events
+        ]
+        fallback_occurred = len(failover_log) > 0
 
         variant.snapshot = updated_evidence
         variant.change_ledger = change_ledger
@@ -655,8 +672,10 @@ class ResumeGenerationService:
         variant.generation_metadata = {
             "provider": str(provider_name),
             "model": str(resolved_model),
+            "fallback_occurred": fallback_occurred,
             "generatedAt": now_iso,
             "failover_log": failover_log,
+            "provider_attempts": execution_events,
             "plan": plan.model_dump(by_alias=True),
         }
         variant.updated_at = now_iso
