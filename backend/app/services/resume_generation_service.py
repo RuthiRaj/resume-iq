@@ -31,9 +31,17 @@ from app.services.resume_planning_service import ResumePlanningService
 from app.ai.retrieval.evidence_ranker import EvidenceRanker
 from app.ai.retrieval.hybrid_matcher import HybridMatcher
 from app.ai.provider import AiAnalyzerProvider
-from app.ai.fallback_provider import FallbackProvider
+import time
 from app.ai.claim_validator import validate_claims_against_source, validate_summary_grounding
 from app.ai.skills import normalize_skill_name
+from app.ai.observability import (
+    TokenUsage,
+    CostBreakdown,
+    StageLatency,
+    GroundingMetrics,
+    calculate_token_cost,
+    CURRENT_PRICING_VERSION,
+)
 from app.core.config import settings
 
 STOPWORDS = {
@@ -222,7 +230,10 @@ class ResumeGenerationService:
         req: GenerateResumeRequest,
         provider: Optional[AiAnalyzerProvider] = None,
     ) -> TargetedResumeVariant:
-        # 1. Fetch live workspace candidate evidence
+        t_total_start = time.perf_counter()
+
+        # 1. Fetch live workspace candidate evidence (Stage: Retrieval)
+        t_retrieval_start = time.perf_counter()
         candidate_evidence = await ResumeService.get_candidate_resume_data(user, "workspace")
 
         # 2. Reject empty workspace profile
@@ -239,8 +250,10 @@ class ResumeGenerationService:
         # 3. Normalize evidence into unified EvidenceItems and build CareerEvidenceGraph
         norm_items = EvidenceService.normalize_candidate_evidence(user.uid, candidate_evidence)
         evidence_graph = CareerEvidenceGraph(user_id=user.uid, items=norm_items)
+        t_retrieval_ms = round((time.perf_counter() - t_retrieval_start) * 1000, 2)
 
-        # 4. Construct authoritative ResumePlan via ResumePlanningService
+        # 4. Construct authoritative ResumePlan via ResumePlanningService (Stage: Planning)
+        t_planning_start = time.perf_counter()
         plan: ResumePlan = ResumePlanningService.create_resume_plan(
             target_role=req.target_role,
             target_company=req.target_company or "",
@@ -361,27 +374,40 @@ class ResumeGenerationService:
             f"Please generate a tailored professional summary and reword the experience and project bullets "
             f"for this target role. Follow all anti-hallucination, claim-preservation, and hard gap rules strictly."
         )
+        t_planning_ms = round((time.perf_counter() - t_planning_start) * 1000, 2)
 
-        # 8. Execute LLM generation using the provider chain
+        # 8. Execute LLM generation using the provider chain (Stage: Generation)
         active_provider = provider or FallbackProvider()
+        t_gen_accum = 0.0
+        t_gen1_start = time.perf_counter()
         try:
             llm_output = await active_provider.generate_json(
                 system_instruction=GENERATION_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 schema_hint=SCHEMA_HINT,
             )
+            t_gen_accum += (time.perf_counter() - t_gen1_start) * 1000
         except HTTPException:
+            t_gen_accum += (time.perf_counter() - t_gen1_start) * 1000
             raise
         except Exception as e:
+            t_gen_accum += (time.perf_counter() - t_gen1_start) * 1000
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail=f"Failed to generate resume tailoring: {e}",
             )
 
-        # 9. Validate output schema and ground all generated rewrites
+        # 9. Validate output schema and ground all generated rewrites (Stage: Validation)
+        t_val_accum = 0.0
+        t_val1_start = time.perf_counter()
         now_iso = datetime.now(timezone.utc).isoformat()
         change_ledger: List[ChangeRecord] = []
         candidate_skills = [s.name for s in candidate_evidence.skills]
+
+        # Grounding metrics counters
+        claims_evaluated = 0
+        claims_accepted = 0
+        claims_rejected = 0
 
         try:
             parsed_gen = ResumeGenerationOutput.model_validate(llm_output)
@@ -439,6 +465,7 @@ class ResumeGenerationService:
             for b_idx, orig_bullet in enumerate(exp_bullets):
                 rewritten = item_rewrites.get(b_idx)
                 if rewritten and rewritten != orig_bullet:
+                    claims_evaluated += 1
                     val_res = validate_claims_against_source(
                         proposed_bullet=rewritten,
                         source_evidence=orig_bullet,
@@ -446,8 +473,10 @@ class ResumeGenerationService:
                         candidate_skills=candidate_skills,
                     )
                     if val_res.is_valid:
+                        claims_accepted += 1
                         final_bullet_map[exp.id][b_idx] = rewritten
                     else:
+                        claims_rejected += 1
                         rejected_for_retry.append({
                             "section": "experience",
                             "itemId": exp.id,
@@ -476,6 +505,7 @@ class ResumeGenerationService:
             for b_idx, orig_bullet in enumerate(proj_bullets):
                 rewritten = item_rewrites.get(b_idx)
                 if rewritten and rewritten != orig_bullet:
+                    claims_evaluated += 1
                     val_res = validate_claims_against_source(
                         proposed_bullet=rewritten,
                         source_evidence=orig_bullet,
@@ -483,8 +513,10 @@ class ResumeGenerationService:
                         candidate_skills=candidate_skills,
                     )
                     if val_res.is_valid:
+                        claims_accepted += 1
                         final_bullet_map[proj.id][b_idx] = rewritten
                     else:
+                        claims_rejected += 1
                         rejected_for_retry.append({
                             "section": "project",
                             "itemId": proj.id,
@@ -496,6 +528,8 @@ class ResumeGenerationService:
                         })
                 else:
                     final_bullet_map[proj.id][b_idx] = orig_bullet
+
+        t_val_accum += (time.perf_counter() - t_val1_start) * 1000
 
         # Single Targeted Retry for Rejected Bullets (Capped at 1 Retry LLM Call)
         if rejected_for_retry:
@@ -520,12 +554,16 @@ class ResumeGenerationService:
                 "- If no safe improvement is possible without violating these rules, return the originalBullet exactly unchanged."
             )
 
+            t_retry_start = time.perf_counter()
             try:
                 retry_output = await active_provider.generate_json(
                     system_instruction=GENERATION_SYSTEM_PROMPT,
                     user_prompt=retry_user_prompt,
                     schema_hint=RETRY_SCHEMA_HINT,
                 )
+                t_gen_accum += (time.perf_counter() - t_retry_start) * 1000
+
+                t_val2_start = time.perf_counter()
                 try:
                     parsed_retry = ResumeGenerationOutput.model_validate(retry_output)
                     retry_exp_map: Dict[str, Dict[int, str]] = {}
@@ -550,6 +588,7 @@ class ResumeGenerationService:
                     )
 
                     if retried_text and retried_text != orig_b:
+                        claims_evaluated += 1
                         val_retry = validate_claims_against_source(
                             proposed_bullet=retried_text,
                             source_evidence=orig_b,
@@ -557,15 +596,48 @@ class ResumeGenerationService:
                             candidate_skills=candidate_skills,
                         )
                         if val_retry.is_valid:
+                            claims_accepted += 1
                             final_bullet_map[i_id][b_i] = retried_text
                         else:
+                            claims_rejected += 1
                             final_bullet_map[i_id][b_i] = orig_b
                     else:
                         final_bullet_map[i_id][b_i] = orig_b
+                t_val_accum += (time.perf_counter() - t_val2_start) * 1000
             except Exception:
+                t_gen_accum += (time.perf_counter() - t_retry_start) * 1000
                 # Fallback safely to original bullets if retry fails
                 for rej in rejected_for_retry:
                     final_bullet_map[rej["itemId"]][rej["bulletIndex"]] = rej["originalBullet"]
+
+        # Finalize latencies and grounding counts
+        t_generation_ms = round(t_gen_accum, 2)
+        t_validation_ms = round(t_val_accum, 2)
+
+        # Count reverted bullets (bullets where a rewrite was attempted but ultimately fell back to original)
+        bullets_reverted = 0
+        for exp in selected_exp:
+            exp_bullets = getattr(exp, "bullets", [])
+            for b_idx, orig_bullet in enumerate(exp_bullets):
+                proposed = exp_rewrites_map.get(exp.id, {}).get(b_idx)
+                final_b = final_bullet_map.get(exp.id, {}).get(b_idx, orig_bullet)
+                if proposed and proposed != orig_bullet and final_b == orig_bullet:
+                    bullets_reverted += 1
+
+        for proj in selected_proj:
+            proj_bullets = getattr(proj, "highlights", None) if getattr(proj, "highlights", None) else getattr(proj, "bullets", [])
+            for b_idx, orig_bullet in enumerate(proj_bullets):
+                proposed = proj_rewrites_map.get(proj.id, {}).get(b_idx)
+                final_b = final_bullet_map.get(proj.id, {}).get(b_idx, orig_bullet)
+                if proposed and proposed != orig_bullet and final_b == orig_bullet:
+                    bullets_reverted += 1
+
+        grounding_metrics = GroundingMetrics(
+            claims_evaluated=claims_evaluated,
+            claims_accepted=claims_accepted,
+            claims_rejected=claims_rejected,
+            bullets_reverted=bullets_reverted,
+        )
 
         # Assemble Final Experience and Change Ledger
         final_exp: List[ExperienceItem] = []
@@ -665,6 +737,27 @@ class ResumeGenerationService:
         ]
         fallback_occurred = len(failover_log) > 0
 
+        # Resolve cumulative token usage and deterministic cost
+        if hasattr(active_provider, "cumulative_usage") and isinstance(active_provider.cumulative_usage, TokenUsage):
+            cumulative_usage = active_provider.cumulative_usage
+        else:
+            p_last_u = getattr(active_provider, "last_usage", None)
+            cumulative_usage = p_last_u if isinstance(p_last_u, TokenUsage) else TokenUsage()
+
+        if hasattr(active_provider, "cumulative_cost") and isinstance(active_provider.cumulative_cost, CostBreakdown):
+            cumulative_cost = active_provider.cumulative_cost
+        else:
+            cumulative_cost = calculate_token_cost(str(provider_name), str(resolved_model), cumulative_usage)
+
+        t_total_ms = round((time.perf_counter() - t_total_start) * 1000, 2)
+        stage_latency = StageLatency(
+            retrieval_ms=t_retrieval_ms,
+            planning_ms=t_planning_ms,
+            generation_ms=t_generation_ms,
+            validation_ms=t_validation_ms,
+            total_ms=t_total_ms,
+        )
+
         variant.snapshot = updated_evidence
         variant.change_ledger = change_ledger
         variant.provider = str(provider_name)
@@ -672,8 +765,16 @@ class ResumeGenerationService:
         variant.generation_metadata = {
             "provider": str(provider_name),
             "model": str(resolved_model),
+            "operation": "resume_tailoring",
             "fallback_occurred": fallback_occurred,
             "generatedAt": now_iso,
+            "pricing_version": cumulative_cost.pricing_version,
+            "pricing_source": cumulative_cost.pricing_source,
+            "token_usage": cumulative_usage.model_dump(),
+            "cost": cumulative_cost.model_dump(),
+            "cumulative_cost_usd": cumulative_cost.total_cost_usd,
+            "stage_latency": stage_latency.model_dump(),
+            "grounding_metrics": grounding_metrics.model_dump(),
             "failover_log": failover_log,
             "provider_attempts": execution_events,
             "plan": plan.model_dump(by_alias=True),

@@ -1,5 +1,6 @@
-from typing import Literal, Optional
+from typing import Literal, Optional, Any
 from pydantic import BaseModel, Field, ConfigDict
+from app.ai.observability import TokenUsage
 
 
 class ScoreBreakdown(BaseModel):
@@ -40,5 +41,9 @@ class AnalysisMetadata(BaseModel):
     job_description_hash: str = Field(..., alias="jobDescriptionHash")
     target_role: str = Field(..., alias="targetRole")
     target_company: Optional[str] = Field(default="", alias="targetCompany")
+    token_usage: Optional[TokenUsage] = Field(default=None, alias="tokenUsage")
+    estimated_cost_usd: Optional[float] = Field(default=None, alias="estimatedCostUsd")
+    latency_ms: Optional[float] = Field(default=None, alias="latencyMs")
+    pricing_version: Optional[str] = Field(default=None, alias="pricingVersion")
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)

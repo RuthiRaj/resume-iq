@@ -35,6 +35,7 @@ from app.ai.skills import (
 from app.ai.grounding import reconcile_requirement_coverage
 from app.ai.remediation_engine import generate_remediation_suggestions
 from app.ai.resilience import repair_and_parse_json, ProviderResilienceError
+from app.ai.observability import TokenUsage, calculate_token_cost
 
 SYSTEM_INSTRUCTION = """You are a Senior Principal Technical Recruiter and ATS (Applicant Tracking System) Intelligence Engine.
 Your task is to analyze candidate resume evidence against a target Job Description in a SINGLE comprehensive pass:
@@ -248,6 +249,9 @@ GEMINI_RESPONSE_SCHEMA = {
 
 
 class GeminiAnalyzerProvider:
+    def __init__(self):
+        self._last_usage: Optional[TokenUsage] = None
+
     @property
     def name(self) -> str:
         return "gemini"
@@ -255,6 +259,10 @@ class GeminiAnalyzerProvider:
     @property
     def model_name(self) -> str:
         return settings.AI_ANALYZER_MODEL if (settings.AI_ANALYZER_MODEL and settings.AI_ANALYZER_MODEL.startswith("gemini-")) else "gemini-2.5-flash"
+
+    @property
+    def last_usage(self) -> Optional[TokenUsage]:
+        return self._last_usage
 
     async def ping(self, timeout: float = 5.0) -> Dict[str, Any]:
         """Runs a 1-token health ping with timeout, returning status and latency without leaking keys."""
@@ -342,6 +350,14 @@ class GeminiAnalyzerProvider:
                 timeout=45.0,
             )
             response_text = response.text or ""
+            raw_u = getattr(response, "usage_metadata", None)
+            if raw_u:
+                p_tok = int(getattr(raw_u, "prompt_token_count", 0) or 0)
+                c_tok = int(getattr(raw_u, "candidates_token_count", 0) or 0)
+                t_tok = int(getattr(raw_u, "total_token_count", p_tok + c_tok) or (p_tok + c_tok))
+                self._last_usage = TokenUsage(prompt_tokens=p_tok, completion_tokens=c_tok, total_tokens=t_tok)
+            else:
+                self._last_usage = None
         except asyncio.TimeoutError:
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -428,6 +444,14 @@ class GeminiAnalyzerProvider:
                 ),
             )
             response_text = response.text or ""
+            raw_u = getattr(response, "usage_metadata", None)
+            if raw_u:
+                p_tok = int(getattr(raw_u, "prompt_token_count", 0) or 0)
+                c_tok = int(getattr(raw_u, "candidates_token_count", 0) or 0)
+                t_tok = int(getattr(raw_u, "total_token_count", p_tok + c_tok) or (p_tok + c_tok))
+                self._last_usage = TokenUsage(prompt_tokens=p_tok, completion_tokens=c_tok, total_tokens=t_tok)
+            else:
+                self._last_usage = None
         except Exception as e:
             err_str = str(e)
             if "timeout" in err_str.lower() or "timed out" in err_str.lower() or "deadline" in err_str.lower():
@@ -588,6 +612,7 @@ class GeminiAnalyzerProvider:
             candidate_evidence=candidate_evidence,
         )
 
+        cost_calc = calculate_token_cost(self.name, model_name, self._last_usage) if self._last_usage else None
         metadata = AnalysisMetadata(
             provider=self.name,
             model=model_name,
@@ -595,6 +620,9 @@ class GeminiAnalyzerProvider:
             job_description_hash=job_description_hash,
             target_role=target_role,
             target_company=target_company or "",
+            token_usage=self._last_usage,
+            estimated_cost_usd=cost_calc.total_cost_usd if cost_calc else None,
+            pricing_version=cost_calc.pricing_version if cost_calc else None,
         )
 
         return AnalyzeResponse(

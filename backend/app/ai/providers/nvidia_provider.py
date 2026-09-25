@@ -25,6 +25,7 @@ from app.schemas.job_description import (
 from app.schemas.requirement_match import RequirementMatch
 from app.ai.scoring import calculate_deterministic_ats_score
 from app.ai.resilience import repair_and_parse_json, ProviderResilienceError
+from app.ai.observability import TokenUsage, calculate_token_cost
 from app.ai.skills import (
     normalize_skill_name,
     normalize_and_deduplicate_skill_requirements,
@@ -198,6 +199,9 @@ class NvidiaAnalyzerProvider:
     NVIDIA AI Analyzer Provider using NVIDIA NIM OpenAI-compatible endpoint.
     """
 
+    def __init__(self):
+        self._last_usage: Optional[TokenUsage] = None
+
     @property
     def name(self) -> str:
         return "nvidia"
@@ -205,6 +209,10 @@ class NvidiaAnalyzerProvider:
     @property
     def model_name(self) -> str:
         return settings.NVIDIA_MODEL or "meta/llama-3.3-70b-instruct"
+
+    @property
+    def last_usage(self) -> Optional[TokenUsage]:
+        return self._last_usage
 
     async def ping(self, timeout: float = 5.0) -> Dict[str, Any]:
         """Runs a 1-token health ping with timeout, returning status and latency without leaking keys."""
@@ -353,6 +361,14 @@ class NvidiaAnalyzerProvider:
             if not choices:
                 raise ValueError("No choices in NVIDIA response")
             response_text = choices[0].get("message", {}).get("content", "") or ""
+            raw_u = res_json.get("usage") if isinstance(res_json, dict) else None
+            if isinstance(raw_u, dict):
+                p_tok = int(raw_u.get("prompt_tokens", 0) or 0)
+                c_tok = int(raw_u.get("completion_tokens", 0) or 0)
+                t_tok = int(raw_u.get("total_tokens", p_tok + c_tok) or (p_tok + c_tok))
+                self._last_usage = TokenUsage(prompt_tokens=p_tok, completion_tokens=c_tok, total_tokens=t_tok)
+            else:
+                self._last_usage = None
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -479,6 +495,14 @@ class NvidiaAnalyzerProvider:
             if not choices:
                 raise ValueError("No choices in NVIDIA response")
             response_text = choices[0].get("message", {}).get("content", "") or ""
+            raw_u = res_json.get("usage") if isinstance(res_json, dict) else None
+            if isinstance(raw_u, dict):
+                p_tok = int(raw_u.get("prompt_tokens", 0) or 0)
+                c_tok = int(raw_u.get("completion_tokens", 0) or 0)
+                t_tok = int(raw_u.get("total_tokens", p_tok + c_tok) or (p_tok + c_tok))
+                self._last_usage = TokenUsage(prompt_tokens=p_tok, completion_tokens=c_tok, total_tokens=t_tok)
+            else:
+                self._last_usage = None
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -645,6 +669,7 @@ class NvidiaAnalyzerProvider:
             proposed_rewrites_by_name=proposed_rewrites_by_name,
         )
 
+        cost_calc = calculate_token_cost(self.name, model_name, self._last_usage) if self._last_usage else None
         metadata = AnalysisMetadata(
             provider=self.name,
             model=model_name,
@@ -652,6 +677,9 @@ class NvidiaAnalyzerProvider:
             job_description_hash=job_description_hash,
             target_role=target_role,
             target_company=target_company or "",
+            token_usage=self._last_usage,
+            estimated_cost_usd=cost_calc.total_cost_usd if cost_calc else None,
+            pricing_version=cost_calc.pricing_version if cost_calc else None,
         )
 
         return AnalyzeResponse(

@@ -34,6 +34,7 @@ from app.ai.skills import (
 from app.ai.grounding import reconcile_requirement_coverage
 from app.ai.remediation_engine import generate_remediation_suggestions
 from app.ai.resilience import repair_and_parse_json, ProviderResilienceError
+from app.ai.observability import TokenUsage, calculate_token_cost, CURRENT_PRICING_VERSION
 
 SYSTEM_INSTRUCTION = """You are a Senior Principal Technical Recruiter and ATS (Applicant Tracking System) Intelligence Engine.
 Your task is to analyze candidate resume evidence against a target Job Description in a SINGLE comprehensive pass:
@@ -214,6 +215,9 @@ async def close_groq_client() -> None:
 
 
 class GroqAnalyzerProvider:
+    def __init__(self):
+        self._last_usage: Optional[TokenUsage] = None
+
     @property
     def name(self) -> str:
         return "groq"
@@ -222,6 +226,10 @@ class GroqAnalyzerProvider:
     def model_name(self) -> str:
         m = settings.AI_ANALYZER_MODEL
         return m if (m and not m.startswith("nvidia/") and not m.startswith("gemini-")) else "llama-3.3-70b-versatile"
+
+    @property
+    def last_usage(self) -> Optional[TokenUsage]:
+        return self._last_usage
 
     async def ping(self, timeout: float = 5.0) -> Dict[str, Any]:
         """Runs a 1-token health ping with timeout, returning status and latency without leaking keys."""
@@ -302,6 +310,14 @@ class GroqAnalyzerProvider:
                 temperature=0.2,
             )
             response_text = chat_completion.choices[0].message.content or ""
+            raw_u = getattr(chat_completion, "usage", None)
+            if raw_u:
+                p_tok = int(getattr(raw_u, "prompt_tokens", 0) or 0)
+                c_tok = int(getattr(raw_u, "completion_tokens", 0) or 0)
+                t_tok = int(getattr(raw_u, "total_tokens", p_tok + c_tok) or (p_tok + c_tok))
+                self._last_usage = TokenUsage(prompt_tokens=p_tok, completion_tokens=c_tok, total_tokens=t_tok)
+            else:
+                self._last_usage = None
         except Exception as e:
             err_str = str(e)
             if "timeout" in err_str.lower() or "timed out" in err_str.lower() or "deadline" in err_str.lower():
@@ -390,6 +406,14 @@ class GroqAnalyzerProvider:
                 temperature=0.2,
             )
             response_text = chat_completion.choices[0].message.content or ""
+            raw_u = getattr(chat_completion, "usage", None)
+            if raw_u:
+                p_tok = int(getattr(raw_u, "prompt_tokens", 0) or 0)
+                c_tok = int(getattr(raw_u, "completion_tokens", 0) or 0)
+                t_tok = int(getattr(raw_u, "total_tokens", p_tok + c_tok) or (p_tok + c_tok))
+                self._last_usage = TokenUsage(prompt_tokens=p_tok, completion_tokens=c_tok, total_tokens=t_tok)
+            else:
+                self._last_usage = None
         except Exception as e:
             err_str = str(e)
             if "timeout" in err_str.lower() or "timed out" in err_str.lower() or "deadline" in err_str.lower():
@@ -572,6 +596,7 @@ class GroqAnalyzerProvider:
             proposed_rewrites_by_name=proposed_rewrites_by_name,
         )
 
+        cost_calc = calculate_token_cost(self.name, model_name, self._last_usage) if self._last_usage else None
         metadata = AnalysisMetadata(
             provider=self.name,
             model=model_name,
@@ -579,6 +604,9 @@ class GroqAnalyzerProvider:
             job_description_hash=job_description_hash,
             target_role=target_role,
             target_company=target_company or "",
+            token_usage=self._last_usage,
+            estimated_cost_usd=cost_calc.total_cost_usd if cost_calc else None,
+            pricing_version=cost_calc.pricing_version if cost_calc else None,
         )
 
         return AnalyzeResponse(

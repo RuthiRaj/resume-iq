@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field, ConfigDict
 from fastapi import HTTPException, status
 
 
+from app.ai.observability import TokenUsage, CostBreakdown, calculate_token_cost
+
+
 class ProviderErrorType(str, Enum):
     TIMEOUT = "TIMEOUT"
     RATE_LIMIT_429 = "RATE_LIMIT_429"
@@ -27,6 +30,9 @@ class ProviderExecutionEvent(BaseModel):
     error_detail: Optional[str] = Field(default=None, description="Sanitized error description")
     retry_count: int = Field(default=0, ge=0, description="Number of bounded in-provider retries performed")
     success: bool = Field(default=True, description="Whether the call succeeded")
+    token_usage: Optional[TokenUsage] = Field(default=None, description="Extracted token usage if available")
+    cost: Optional[CostBreakdown] = Field(default=None, description="Deterministic cost calculation if available")
+    operation: Optional[str] = Field(default=None, description="Operation identifier e.g. ats_analysis, resume_tailoring_initial")
     timestamp: float = Field(default_factory=time.time, description="Epoch timestamp of the event")
 
     model_config = ConfigDict(populate_by_name=True)

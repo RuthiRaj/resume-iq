@@ -16,6 +16,11 @@ from app.ai.resilience import (
     classify_provider_exception,
     is_transient_error,
 )
+from app.ai.observability import (
+    TokenUsage,
+    CostBreakdown,
+    calculate_token_cost,
+)
 
 
 def has_key_for_provider(provider_name: str) -> bool:
@@ -81,6 +86,29 @@ class FallbackProvider:
         return list(self._execution_events)
 
     @property
+    def cumulative_usage(self) -> TokenUsage:
+        """Returns the sum of all token usages across all attempts in this execution chain."""
+        total = TokenUsage()
+        for ev in self._execution_events:
+            if ev.token_usage:
+                total = total.add(ev.token_usage)
+        return total
+
+    @property
+    def cumulative_cost(self) -> CostBreakdown:
+        """Returns the sum of all costs across all attempts in this execution chain."""
+        total = CostBreakdown()
+        for ev in self._execution_events:
+            if ev.cost:
+                total = total.add(ev.cost)
+        return total
+
+    @property
+    def total_latency_ms(self) -> float:
+        """Returns total provider execution duration across all attempts."""
+        return round(sum(ev.latency_ms or 0.0 for ev in self._execution_events), 2)
+
+    @property
     def providers(self) -> List[AiAnalyzerProvider]:
         return self._providers
 
@@ -103,9 +131,10 @@ class FallbackProvider:
         provider: AiAnalyzerProvider,
         func_name: str,
         *args: Any,
+        operation: Optional[str] = None,
         **kwargs: Any,
     ) -> Any:
-        """Executes a provider method with bounded retry on transient errors."""
+        """Executes a provider method with bounded retry on transient errors and token/cost tracking."""
         raw_p = getattr(provider, "name", "unknown")
         p_name = str(raw_p) if not hasattr(raw_p, "_mock_name") and isinstance(raw_p, str) else str(getattr(provider, "name", "unknown"))
         raw_m = getattr(provider, "model_name", p_name)
@@ -119,6 +148,11 @@ class FallbackProvider:
                 method = getattr(provider, func_name)
                 res = await method(*args, **kwargs)
                 latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+                raw_u = getattr(provider, "last_usage", None)
+                usage = raw_u if isinstance(raw_u, TokenUsage) else None
+                cost = calculate_token_cost(p_name, m_name, usage) if usage else None
+
                 event = ProviderExecutionEvent(
                     provider_name=p_name,
                     model_name=m_name,
@@ -127,6 +161,9 @@ class FallbackProvider:
                     error_detail=None,
                     retry_count=attempt,
                     success=True,
+                    token_usage=usage,
+                    cost=cost,
+                    operation=operation,
                 )
                 self._execution_events.append(event)
                 self._last_provider = p_name
@@ -146,6 +183,9 @@ class FallbackProvider:
                         error_detail=str(exc),
                         retry_count=attempt,
                         success=False,
+                        token_usage=None,
+                        cost=None,
+                        operation=operation,
                     )
                     self._execution_events.append(event)
                 except Exception:

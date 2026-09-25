@@ -137,23 +137,23 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Plan & Subscription */}
+      {/* Platform Features & Access */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>Subscription Tier</CardTitle>
-              <CardDescription>Your active platform permissions and quotas</CardDescription>
+              <CardTitle>Platform Features</CardTitle>
+              <CardDescription>Your active platform capabilities and access</CardDescription>
             </div>
             <Badge variant="accent" className="font-semibold">
-              Pro Career Tier
+              All Features Active
             </Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="rounded-btn border border-border bg-page p-4 space-y-2">
             <div className="flex items-center justify-between text-body font-semibold text-primary">
-              <span>Pro Membership</span>
+              <span>ResumeIQ — Full Platform Access</span>
               <span>Active</span>
             </div>
             <p className="text-small text-secondary">
