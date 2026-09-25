@@ -20,6 +20,13 @@ import { Modal } from "@/components/ui/modal";
 import { LoadingState, EmptyState, ErrorAlert, ToastBanner } from "@/components/common/state-views";
 import { formatDate } from "@/lib/utils";
 import {
+  TransferableSkillBridge,
+  AnalyzeGapsResponse,
+  AttestSkillResponse,
+} from "@/types/career";
+import { BridgeAttestationModal } from "@/components/career/BridgeAttestationModal";
+import { GapRemediationDrawer } from "@/components/career/GapRemediationDrawer";
+import {
   AlertTriangle,
   ArrowLeft,
   Award,
@@ -145,6 +152,14 @@ export default function TargetedResumeWorkspacePage() {
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const [pdfPreviewError, setPdfPreviewError] = useState<string | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
+
+  // Career Intelligence & Experiential Gap State
+  const [careerAnalysis, setCareerAnalysis] = useState<AnalyzeGapsResponse | null>(null);
+  const [isCareerLoading, setIsCareerLoading] = useState(false);
+  const [selectedBridge, setSelectedBridge] = useState<TransferableSkillBridge | null>(null);
+  const [isAttestationModalOpen, setIsAttestationModalOpen] = useState(false);
+  const [isRemediationDrawerOpen, setIsRemediationDrawerOpen] = useState(false);
+  const [currentIdToken, setCurrentIdToken] = useState<string>("");
 
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
@@ -298,10 +313,47 @@ export default function TargetedResumeWorkspacePage() {
     [user, provenanceCache]
   );
 
+  // Fetch Career Intelligence Gaps and Bridges
+  const fetchCareerAnalysis = useCallback(async () => {
+    if (!user || !variantId) return;
+    setIsCareerLoading(true);
+    try {
+      const idToken = await user.getIdToken();
+      setCurrentIdToken(idToken);
+      const res = await fetch("/api/career/analyze-gaps", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ variantId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setCareerAnalysis(data);
+      }
+    } catch (err) {
+      console.warn("Could not load career intelligence:", err);
+    } finally {
+      setIsCareerLoading(false);
+    }
+  }, [user, variantId]);
+
+  const handleAttestationSuccess = (response: AttestSkillResponse) => {
+    showToast(
+      `Successfully attested "${response.requirementName}". Variant updated to v${response.newVersion}.`,
+      "success"
+    );
+    fetchVariant(true);
+    fetchFitComparison();
+    fetchCareerAnalysis();
+  };
+
   useEffect(() => {
     fetchVariant();
     fetchFitComparison();
-  }, [fetchVariant, fetchFitComparison]);
+    fetchCareerAnalysis();
+  }, [fetchVariant, fetchFitComparison, fetchCareerAnalysis]);
 
   // Clean up PDF object URL on unmount or format change
   const cleanupPdfPreview = useCallback(() => {
@@ -2068,6 +2120,116 @@ export default function TargetedResumeWorkspacePage() {
                   </Card>
                 );
               })()}
+
+              {/* Career Intelligence & Experiential Gap Bridging Section (Phase 5.0) */}
+              <Card className="border-border shadow-subtle bg-surface divide-y divide-border/60">
+                <div className="p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-accent" />
+                      <h4 className="text-small font-bold uppercase tracking-wider text-muted">
+                        Career Intelligence & Gap Bridging Engine
+                      </h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {careerAnalysis && (
+                        <>
+                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/30 text-xs">
+                            {careerAnalysis.transferableBridgesCount} Transferable Bridge{careerAnalysis.transferableBridgesCount !== 1 ? "s" : ""}
+                          </Badge>
+                          <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/30 text-xs">
+                            {careerAnalysis.hardGapsCount} Hard Gap{careerAnalysis.hardGapsCount !== 1 ? "s" : ""}
+                          </Badge>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-small text-secondary leading-relaxed">
+                    Transferable skill bridges identify legitimate adjacent technologies grounded in your verified experience.
+                    You can attest genuine hands-on experience to safely bridge gaps with ClaimValidator protection.
+                  </p>
+
+                  {/* Transferable Bridges List */}
+                  {careerAnalysis && careerAnalysis.transferableBridges.length > 0 && (
+                    <div className="space-y-3 pt-2">
+                      <span className="text-caption font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                        Transferable Skill Bridges Identified ({careerAnalysis.transferableBridges.length})
+                      </span>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {careerAnalysis.transferableBridges.map((brg, idx) => (
+                          <div
+                            key={idx}
+                            className="p-4 rounded-card border border-emerald-500/30 bg-page/70 space-y-3 flex flex-col justify-between"
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 text-xs font-mono">
+                                    {brg.candidateSkill}
+                                  </Badge>
+                                  <span className="text-xs text-muted">&rarr;</span>
+                                  <Badge variant="outline" className="bg-primary/10 text-primary text-xs font-mono">
+                                    {brg.requiredSkill}
+                                  </Badge>
+                                </div>
+                                <span className="text-caption font-semibold text-emerald-600 dark:text-emerald-400">
+                                  {Math.round(brg.transferabilityScore * 100)}% Adjacency
+                                </span>
+                              </div>
+
+                              <p className="text-xs text-secondary leading-relaxed">
+                                {brg.transferRationale}
+                              </p>
+                            </div>
+
+                            <div className="pt-2 border-t border-border/40 flex items-center justify-between">
+                              <span className="text-[11px] text-muted truncate max-w-[180px]">
+                                Grounded in: {brg.sourceEvidenceTitle || "Experience"}
+                              </span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-xs border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 gap-1"
+                                onClick={() => {
+                                  setSelectedBridge(brg);
+                                  setIsAttestationModalOpen(true);
+                                }}
+                              >
+                                <Sparkles className="w-3 h-3" />
+                                <span>Attest Experience</span>
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Hard Gap Remediation Blueprint Trigger */}
+                  {careerAnalysis && careerAnalysis.hardGapRemediations.length > 0 && (
+                    <div className="p-4 rounded-card border border-border bg-page/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3">
+                      <div className="space-y-1">
+                        <span className="text-small font-semibold text-primary block">
+                          Actionable Learning Paths & Project Blueprints ({careerAnalysis.hardGapRemediations.length})
+                        </span>
+                        <p className="text-caption text-secondary">
+                          Structured study plans and verifiable portfolio project architectures to honestly bridge ungrounded requirements.
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="shrink-0 gap-1.5"
+                        onClick={() => setIsRemediationDrawerOpen(true)}
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        <span>View Remediation Blueprints</span>
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </Card>
             </div>
           )}
         </div>
@@ -2988,6 +3150,32 @@ export default function TargetedResumeWorkspacePage() {
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Career Intelligence Bridge Attestation Modal */}
+      {selectedBridge && (
+        <BridgeAttestationModal
+          isOpen={isAttestationModalOpen}
+          onClose={() => {
+            setIsAttestationModalOpen(false);
+            setSelectedBridge(null);
+          }}
+          bridge={selectedBridge}
+          variantId={variantId}
+          variantVersion={variant?.version || 1}
+          authToken={currentIdToken}
+          onAttestationSuccess={handleAttestationSuccess}
+        />
+      )}
+
+      {/* Gap Remediation Blueprints Drawer */}
+      {careerAnalysis && (
+        <GapRemediationDrawer
+          isOpen={isRemediationDrawerOpen}
+          onClose={() => setIsRemediationDrawerOpen(false)}
+          remediations={careerAnalysis.hardGapRemediations}
+          targetRole={variant?.targetRole || "Target Role"}
+        />
       )}
     </div>
   );
