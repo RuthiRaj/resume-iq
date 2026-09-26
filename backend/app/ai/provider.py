@@ -1,7 +1,6 @@
-from typing import Protocol, Optional, TYPE_CHECKING
-if TYPE_CHECKING:
-    from app.schemas.candidate import CandidateEvidence
-    from app.schemas.analyze import AnalyzeResponse
+from typing import Protocol, Optional
+from app.schemas.candidate import CandidateEvidence
+from app.schemas.analyze import AnalyzeResponse
 
 
 class AiAnalyzerProvider(Protocol):
