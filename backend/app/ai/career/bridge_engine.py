@@ -62,6 +62,7 @@ class BridgeEngine:
         # Index from candidate projects
         for i, proj in enumerate(candidate_evidence.projects):
             item_id = proj.id or f"proj_{i}"
+            item_title = getattr(proj, "title", None) or getattr(proj, "name", "Project")
             proj_techs = getattr(proj, "tech_stack", None) or getattr(proj, "technologies", []) or []
             for t in proj_techs:
                 norm_t = normalize_skill_name(t).lower()

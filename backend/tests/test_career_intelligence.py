@@ -601,3 +601,44 @@ def test_adv_038_telemetry_free_product_invariant():
         source_code = inspect.getsource(mod).lower()
         for term in forbidden_terms:
             assert term not in source_code, f"Forbidden billing term '{term}' found in {mod.__name__}"
+
+
+def test_bridge_engine_indexes_project_evidence_safely():
+    """Verifies BridgeEngine.find_transferable_bridges safely indexes candidate projects with tech_stack without UnboundLocalError."""
+    from app.ai.career.bridge_engine import BridgeEngine
+    from app.schemas.candidate import CandidateEvidence, ProjectItem
+    from app.schemas.requirement_match import RequirementMatch
+
+    evidence = CandidateEvidence(
+        experience=[],
+        projects=[
+            ProjectItem(
+                id="proj_1",
+                title="Cloud Orchestrator",
+                description="Built automated deployment tooling with Docker and Python",
+                tech_stack=["Docker", "Python", "FastAPI"],
+            )
+        ],
+        skills=[],
+    )
+
+    missing_reqs = [
+        RequirementMatch(
+            requirement_name="Kubernetes",
+            requirement_category="DevOps",
+            match_status="Missing",
+            confidence="High",
+            job_source_evidence="Experience with Kubernetes container orchestration required",
+            match_reason="No direct Kubernetes experience found",
+            gap_reason="Candidate lacks Kubernetes production evidence",
+        )
+    ]
+
+    bridges = BridgeEngine.find_transferable_bridges(missing_reqs, evidence)
+    assert isinstance(bridges, list)
+    # Docker bridges to Kubernetes
+    docker_bridges = [b for b in bridges if b.candidate_skill.lower() == "docker"]
+    assert len(docker_bridges) > 0
+    assert docker_bridges[0].source_evidence_title == "Cloud Orchestrator"
+    assert docker_bridges[0].source_section == "Project"
+

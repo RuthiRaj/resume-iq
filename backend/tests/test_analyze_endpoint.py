@@ -110,3 +110,87 @@ def test_analyze_successful_flow_with_authenticated_user(monkeypatch):
     assert data["scoreBreakdown"]["relevance"] == 90
     assert data["matchingSkills"][0]["name"] == "Python"
     assert data["metadata"]["provider"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_run_ats_analysis_primary_timeout_fails_over_to_fallback():
+    """Simulates primary provider timeout and verifies automatic failover to healthy secondary provider."""
+    import asyncio
+    from unittest.mock import AsyncMock
+    from fastapi import HTTPException
+    from app.ai.orchestrator import run_ats_analysis
+    from app.ai.fallback_provider import FallbackProvider
+
+    evidence = CandidateEvidence(headline="Backend Dev", summary="Python developer")
+
+    # Primary provider times out (e.g. 504 / Timeout)
+    p1 = AsyncMock()
+    p1.name = "groq"
+    p1.analyze.side_effect = HTTPException(status_code=504, detail="Primary provider timed out")
+
+    # Fallback provider succeeds
+    expected_response = AnalyzeResponse(
+        ats_score=85,
+        score_breakdown=ScoreBreakdown(relevance=85, keywords=85, metrics=85, formatting=85),
+        summary_feedback="Strong fit from fallback provider.",
+        matching_skills=[SkillMatchItem(name="Python", context="5 years experience")],
+        missing_skills=[],
+        partial_skills=[],
+        metadata=AnalysisMetadata(
+            provider="nvidia",
+            model="meta/llama-3.2-11b-vision-instruct",
+            analyzed_at="2026-08-27T12:00:00Z",
+            job_description_hash="mockhash123",
+            target_role="Software Engineer",
+        ),
+    )
+    p2 = AsyncMock()
+    p2.name = "nvidia"
+    p2.analyze.return_value = expected_response
+
+    fallback_chain = FallbackProvider(providers=[p1, p2])
+
+    result = await run_ats_analysis(
+        target_role="Software Engineer",
+        target_company="Acme Corp",
+        job_description="Looking for an engineer with at least thirty characters in description.",
+        candidate_evidence=evidence,
+        provider=fallback_chain,
+    )
+
+    assert result.ats_score == 85
+    assert result.metadata.provider == "nvidia"
+
+
+@pytest.mark.asyncio
+async def test_run_ats_analysis_all_providers_fail_raises_safe_error():
+    """Verifies that if all providers fail, a safe HTTP 503 is raised without fabricating ATS scores."""
+    from unittest.mock import AsyncMock
+    from fastapi import HTTPException
+    from app.ai.orchestrator import run_ats_analysis
+    from app.ai.fallback_provider import FallbackProvider
+
+    evidence = CandidateEvidence(headline="Backend Dev", summary="Python developer")
+
+    p1 = AsyncMock()
+    p1.name = "groq"
+    p1.analyze.side_effect = HTTPException(status_code=504, detail="Timeout")
+
+    p2 = AsyncMock()
+    p2.name = "nvidia"
+    p2.analyze.side_effect = HTTPException(status_code=503, detail="Service Unavailable")
+
+    fallback_chain = FallbackProvider(providers=[p1, p2])
+
+    with pytest.raises(HTTPException) as exc_info:
+        await run_ats_analysis(
+            target_role="Software Engineer",
+            target_company="Acme Corp",
+            job_description="Looking for an engineer with at least thirty characters in description.",
+            candidate_evidence=evidence,
+            provider=fallback_chain,
+        )
+
+    assert exc_info.value.status_code == 503
+    assert "All AI providers in fallback chain failed" in exc_info.value.detail
+

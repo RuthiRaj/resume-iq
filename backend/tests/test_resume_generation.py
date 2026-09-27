@@ -749,3 +749,28 @@ async def test_fallback_provider_logs_failover_reason_in_metadata(sample_user, s
     assert len(failover_log) == 1
     assert failover_log[0]["provider"] == "groq"
     assert "503" in failover_log[0]["error_type"]
+
+
+@pytest.mark.asyncio
+async def test_generate_role_targeted_resume_default_fallback_provider(sample_user, sample_candidate_evidence, monkeypatch):
+    """Verifies generate_role_targeted_resume uses FallbackProvider when provider=None without NameError."""
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=sample_candidate_evidence))
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", AsyncMock(return_value=True))
+
+    with patch.object(FallbackProvider, "generate_json", new_callable=AsyncMock) as mock_gen:
+        mock_gen.return_value = {
+            "summary": "Backend engineer with 5 years building REST APIs with Python, FastAPI and PostgreSQL.",
+            "experienceRewrites": [],
+            "projectRewrites": [],
+        }
+
+        req = GenerateResumeRequest(targetRole="Senior Backend Engineer")
+        variant = await ResumeGenerationService.generate_role_targeted_resume(
+            user=sample_user,
+            req=req,
+            provider=None,
+        )
+
+        assert variant is not None
+        assert variant.target_role == "Senior Backend Engineer"
+

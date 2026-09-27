@@ -31,6 +31,7 @@ from app.services.resume_planning_service import ResumePlanningService
 from app.ai.retrieval.evidence_ranker import EvidenceRanker
 from app.ai.retrieval.hybrid_matcher import HybridMatcher
 from app.ai.provider import AiAnalyzerProvider
+from app.ai.fallback_provider import FallbackProvider
 import time
 from app.ai.claim_validator import validate_claims_against_source, validate_summary_grounding
 from app.ai.skills import normalize_skill_name
