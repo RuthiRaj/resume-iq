@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AppSidebar } from "@/components/common/app-sidebar";
 import { AppHeader } from "@/components/common/app-header";
 import { LoadingState } from "@/components/common/state-views";
+import { WorkspaceAutoRefresh, GlobalToastHost } from "@/components/common/workspace-auto-refresh";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -57,6 +58,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <div className="mx-auto max-w-7xl space-y-6">{children}</div>
         </main>
       </div>
+
+      {/* Workspace is the source of truth: auto-refresh stale tailored resumes */}
+      <WorkspaceAutoRefresh />
+      <GlobalToastHost />
     </div>
   );
 }
+

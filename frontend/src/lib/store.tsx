@@ -567,7 +567,12 @@ interface CareerContextType {
 
   seedSampleData: () => Promise<void>;
   isLoaded: boolean;
+  /** Names of workspace collections whose Firestore listener failed (app still loads with partial data). */
+  workspaceLoadErrors: string[];
+  /** Increments on every real workspace data change (post initial load). */
+  workspaceRevision: number;
 }
+
 
 const CareerContext = createContext<CareerContextType | null>(null);
 
@@ -585,6 +590,10 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   const [resumes, setResumes] = useState<ResumeItem[]>([]);
   const [actions, setActions] = useState<RecommendedAction[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [workspaceLoadErrors, setWorkspaceLoadErrors] = useState<string[]>([]);
+  // Bumps every time workspace data actually changes (after initial load).
+  // Drives automatic refresh of workspace-sourced tailored resumes.
+  const [workspaceRevision, setWorkspaceRevision] = useState(0);
 
   // Keep refs for callbacks needing fresh state without re-creating identity
   const resumesRef = useRef<ResumeItem[]>(resumes);
@@ -602,9 +611,19 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     userRef.current = user;
   }, [user]);
 
+  const isLoadedRef = useRef(false);
+  useEffect(() => {
+    isLoadedRef.current = isLoaded;
+  }, [isLoaded]);
+
   // Set up real-time Firestore listeners scoped strictly to user.uid
   useEffect(() => {
     const uid = user?.uid;
+    // Reset load state on account change so a new user never briefly sees
+    // the previous user's data as "loaded".
+    setIsLoaded(false);
+    setWorkspaceLoadErrors([]);
+    setWorkspaceRevision(0);
     if (!uid) {
       setProfile(defaultEmptyProfile);
       setEducation([]);
@@ -622,10 +641,29 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // Track initial load of all 10 collections before marking loaded
     const initialLoadedSet = new Set<string>();
+    const failedSet = new Set<string>();
     const markLoaded = (name: string) => {
       initialLoadedSet.add(name);
       if (initialLoadedSet.size >= 10) {
         setIsLoaded(true);
+      }
+    };
+    // A single failing listener (permissions, network) must never hang the
+    // app on its loading skeleton forever: record the failure and settle the
+    // initial load anyway so the user gets partial data + an error signal.
+    const markFailed = (name: string, err: unknown) => {
+      console.error(`[workspace] Firestore listener failed for "${name}":`, err);
+      failedSet.add(name);
+      setWorkspaceLoadErrors(Array.from(failedSet));
+      markLoaded(name);
+    };
+    // Called on every workspace snapshot update AFTER the initial load, so the
+    // revision only moves when data actually changes (local edits, other
+    // devices, or the resync flow writing back). Initial-load snapshots are
+    // excluded via isLoadedRef to avoid a refresh storm on every page load.
+    const noteWorkspaceActivity = () => {
+      if (isLoadedRef.current) {
+        setWorkspaceRevision((r) => r + 1);
       }
     };
 
@@ -643,7 +681,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
         setProfile((prev) => (isCollectionEqual(prev, fallback) ? prev : fallback));
       }
       markLoaded("profile");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("profile", err));
 
     // 2. Education listener
     const unsubEducation = onSnapshot(collection(db, "users", uid, "education"), (snap) => {
@@ -651,7 +690,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EducationData));
       setEducation((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("education");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("education", err));
 
     // 3. Skills listener
     const unsubSkills = onSnapshot(collection(db, "users", uid, "skills"), (snap) => {
@@ -659,7 +699,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as SkillData));
       setSkills((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("skills");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("skills", err));
 
     // 4. Projects listener
     const unsubProjects = onSnapshot(collection(db, "users", uid, "projects"), (snap) => {
@@ -667,7 +708,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProjectData));
       setProjects((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("projects");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("projects", err));
 
     // 5. Experience listener
     const unsubExperience = onSnapshot(collection(db, "users", uid, "experience"), (snap) => {
@@ -675,7 +717,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ExperienceData));
       setExperience((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("experience");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("experience", err));
 
     // 6. Certifications listener
     const unsubCertifications = onSnapshot(collection(db, "users", uid, "certifications"), (snap) => {
@@ -683,7 +726,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as CertificationData));
       setCertifications((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("certifications");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("certifications", err));
 
     // 7. Achievements listener
     const unsubAchievements = onSnapshot(collection(db, "users", uid, "achievements"), (snap) => {
@@ -691,7 +735,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as AchievementData));
       setAchievements((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("achievements");
-    });
+      noteWorkspaceActivity();
+    }, (err) => markFailed("achievements", err));
 
     // 8. Documents listener
     const unsubDocuments = onSnapshot(collection(db, "users", uid, "documents"), (snap) => {
@@ -699,7 +744,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as DocumentData));
       setDocuments((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("documents");
-    });
+    }, (err) => markFailed("documents", err));
 
     // 9. Resumes listener
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
@@ -707,7 +752,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ResumeItem));
       setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("resumes");
-    });
+    }, (err) => markFailed("resumes", err));
 
     // 10. Actions listener
     const unsubActions = onSnapshot(collection(db, "users", uid, "actions"), (snap) => {
@@ -715,7 +760,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as RecommendedAction));
       setActions((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("actions");
-    });
+    }, (err) => markFailed("actions", err));
 
     return () => {
       unsubProfile();
@@ -730,6 +775,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       unsubActions();
     };
   }, [user?.uid]);
+
 
   // Profile persistence via backend API proxy
   const updateProfile = useCallback(
@@ -1227,6 +1273,8 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       dismissAction,
       seedSampleData,
       isLoaded,
+      workspaceLoadErrors,
+      workspaceRevision,
     }),
     [
       profile,
@@ -1268,8 +1316,11 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       dismissAction,
       seedSampleData,
       isLoaded,
+      workspaceLoadErrors,
+      workspaceRevision,
     ]
   );
+
 
   return (
     <CareerContext.Provider value={value}>
