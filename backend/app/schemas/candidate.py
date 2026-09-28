@@ -38,7 +38,7 @@ class SkillItem(BaseModel):
     id: Optional[str] = None
     name: str
     category: str = "Technical"
-    proficiency: str = "Intermediate"
+    proficiency: Optional[str] = None
     years_of_experience: Optional[float] = Field(default=None, alias="yearsOfExperience")
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")

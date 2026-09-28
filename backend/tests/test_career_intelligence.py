@@ -642,3 +642,627 @@ def test_bridge_engine_indexes_project_evidence_safely():
     assert docker_bridges[0].source_evidence_title == "Cloud Orchestrator"
     assert docker_bridges[0].source_section == "Project"
 
+
+# ---------------------------------------------------------------------------
+# 6. Phase 3B: apply_to_workspace Synchronization Unit & Adversarial Tests
+# ---------------------------------------------------------------------------
+
+class _MockFirestoreResponse:
+    def __init__(self, data: Any, status_code: int = 200):
+        self._data = data
+        self.status_code = status_code
+
+    def json(self):
+        return self._data
+
+
+class _MockFirestoreHttpClient:
+    def __init__(self, existing_skills=None, existing_exp=None, existing_proj=None):
+        self.existing_skills = existing_skills or []
+        self.existing_exp = existing_exp or []
+        self.existing_proj = existing_proj or []
+        self.calls = []
+        self.patches = {}
+        self.posts = {}
+        self.deletes = []
+
+    async def get(self, url, headers=None, timeout=None):
+        self.calls.append(("GET", url))
+        if "/skills" in url:
+            return _MockFirestoreResponse({"documents": self.existing_skills}, 200)
+        elif "/experience" in url:
+            return _MockFirestoreResponse({"documents": self.existing_exp}, 200)
+        elif "/projects" in url:
+            return _MockFirestoreResponse({"documents": self.existing_proj}, 200)
+        return _MockFirestoreResponse({}, 404)
+
+    async def patch(self, url, headers=None, json=None, timeout=None):
+        self.calls.append(("PATCH", url, json))
+        self.patches[url] = json
+        return _MockFirestoreResponse({"name": url}, 200)
+
+    async def post(self, url, headers=None, json=None, timeout=None):
+        self.calls.append(("POST", url, json))
+        self.posts[url] = json
+        return _MockFirestoreResponse({"name": f"{url}/new_id"}, 200)
+
+    async def delete(self, url, headers=None, timeout=None):
+        self.calls.append(("DELETE", url))
+        self.deletes.append(url)
+        return _MockFirestoreResponse({}, 200)
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_apply_to_workspace_false_does_not_mutate_workspace(monkeypatch, mock_variant_doc):
+    """Phase 3B: apply_to_workspace=False updates variant but does NOT touch workspace."""
+    from app.services.resume_service import _encode_firestore_fields
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+    mock_client = _MockFirestoreHttpClient()
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        duration_or_scale="2 weeks",
+        apply_to_workspace=False,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+    assert res.workspace_updated is False
+    assert len(mock_client.patches) == 0
+    assert len(mock_client.posts) == 0
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_creates_user_confirmed_skill_without_fake_defaults(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: apply_to_workspace=True creates new workspace skill.
+    Invariant: Must be verification_status='user_confirmed', provenance='user_attestation', confidence=0.70.
+    Invariant: Must NOT invent fake proficiency ('Intermediate') or fake years (1).
+    """
+    from app.services.resume_service import _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+    mock_client = _MockFirestoreHttpClient()
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        duration_or_scale="2 weeks",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+    assert res.workspace_updated is True
+
+    # Find the skill patch/post
+    skill_patches = [v for k, v in mock_client.patches.items() if "/users/usr_1/skills/" in k]
+    assert len(skill_patches) == 1
+    skill_doc = _decode_firestore_doc(skill_patches[0])
+
+    # Assert Grounding Invariants
+    assert skill_doc["name"] == "Vue"
+    assert skill_doc["verificationStatus"] == "user_confirmed"
+    assert skill_doc["verificationStatus"] != "verified"
+    assert skill_doc["provenance"] == "user_attestation"
+    assert skill_doc["provenance"] != "resume_parse"
+    assert skill_doc["confidence"] == 0.70
+    assert skill_doc["sourceDocumentId"] == res.attestation_id
+    assert "proficiency" not in skill_doc or skill_doc["proficiency"] is None
+    assert "yearsOfExperience" not in skill_doc or skill_doc["yearsOfExperience"] is None
+    assert skill_doc["category"] == "Framework"
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_preserves_verified_status(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: Existing verified skill in workspace must NEVER be downgraded to user_confirmed.
+    """
+    from app.services.resume_service import _encode_firestore_fields
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+
+    existing_verified_skill = {
+        "name": "projects/pid/databases/(default)/documents/users/usr_1/skills/skill_existing_vue",
+        "fields": _encode_firestore_fields({
+            "id": "skill_existing_vue",
+            "name": "Vue",
+            "verificationStatus": "verified",
+            "provenance": "resume_parse",
+            "confidence": 0.95,
+            "proficiency": "Expert",
+            "yearsOfExperience": 5,
+            "category": "Frameworks & Libraries",
+        })
+    }
+
+    mock_client = _MockFirestoreHttpClient(existing_skills=[existing_verified_skill])
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        duration_or_scale="2 weeks",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+    assert res.workspace_updated is True
+
+    # Invariant: Skill endpoint was NOT patched with a downgrade
+    skill_patches = [v for k, v in mock_client.patches.items() if "/users/usr_1/skills/" in k]
+    assert len(skill_patches) == 0
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_preserves_existing_user_confirmed_attributes(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: Existing user_confirmed skill preserves its candidate-entered proficiency and years.
+    """
+    from app.services.resume_service import _encode_firestore_fields, _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+
+    existing_skill = {
+        "name": "projects/pid/databases/(default)/documents/users/usr_1/skills/skill_vue_123",
+        "fields": _encode_firestore_fields({
+            "id": "skill_vue_123",
+            "name": "Vue",
+            "verificationStatus": "user_confirmed",
+            "provenance": "user_attestation",
+            "confidence": 0.70,
+            "proficiency": "Advanced",
+            "yearsOfExperience": 3,
+            "category": "Frameworks & Libraries",
+        })
+    }
+
+    mock_client = _MockFirestoreHttpClient(existing_skills=[existing_skill])
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+
+    skill_patches = [v for k, v in mock_client.patches.items() if "/users/usr_1/skills/" in k]
+    assert len(skill_patches) == 1
+    decoded = _decode_firestore_doc(skill_patches[0])
+    assert decoded["proficiency"] == "Advanced"
+    assert decoded["yearsOfExperience"] == 3
+    assert decoded["verificationStatus"] == "user_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_updates_experience_item_with_attestation_id(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: Target experience item has bullet, tech, and attestationId synchronized.
+    """
+    from app.services.resume_service import _encode_firestore_fields, _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+
+    existing_exp = {
+        "name": "projects/pid/databases/(default)/documents/users/usr_1/experience/exp_doc_99",
+        "fields": _encode_firestore_fields({
+            "id": "exp_doc_99",
+            "company": "Tech Corp",
+            "role": "Frontend Engineer",
+            "bullets": ["Existing bullet 1."],
+            "technologies": ["React"],
+            "attestationIds": [],
+            "verificationStatus": "verified",
+        })
+    }
+
+    mock_client = _MockFirestoreHttpClient(existing_exp=[existing_exp])
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+
+    exp_patches = [v for k, v in mock_client.patches.items() if f"/users/{user.uid}/experience/" in k]
+    assert len(exp_patches) == 1
+    decoded = _decode_firestore_doc(exp_patches[0])
+
+    assert len(decoded["bullets"]) == 2
+    assert any("utilizing Vue" in b for b in decoded["bullets"])
+    assert "Vue" in decoded["technologies"]
+    assert res.attestation_id in decoded["attestationIds"]
+    assert decoded["verificationStatus"] == "verified"
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_updates_project_item(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: Target project item has highlight, techStack, and attestationId synchronized.
+    """
+    from app.services.resume_service import _encode_firestore_fields, _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+
+    existing_proj = {
+        "name": "projects/pid/databases/(default)/documents/users/usr_1/projects/proj_doc_42",
+        "fields": _encode_firestore_fields({
+            "id": "proj_doc_42",
+            "title": "Cloud Dashboard",
+            "role": "Lead Architect",
+            "highlights": ["Existing highlight 1."],
+            "techStack": ["React"],
+            "attestationIds": [],
+        })
+    }
+
+    import copy
+    variant_doc = copy.deepcopy(mock_variant_doc)
+    variant_doc["snapshot"]["projects"] = [
+        {
+            "id": "proj_0",
+            "title": "Cloud Dashboard",
+            "role": "Lead Architect",
+            "highlights": ["Architected prototype dashboards using React."],
+            "techStack": ["React"],
+            "technologies": ["React"],
+        }
+    ]
+
+    mock_client = _MockFirestoreHttpClient(existing_proj=[existing_proj])
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="proj_0",
+        target_bullet_index=0,
+        attested_context="Hands-on prototype development at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+
+    proj_patches = [v for k, v in mock_client.patches.items() if f"/users/{user.uid}/projects/" in k]
+    assert len(proj_patches) == 1
+    decoded = _decode_firestore_doc(proj_patches[0])
+
+    assert len(decoded["highlights"]) == 2
+    assert any("utilizing Vue" in h for h in decoded["highlights"])
+    assert "Vue" in decoded["techStack"]
+    assert res.attestation_id in decoded["attestationIds"]
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_idempotent_retry(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: Idempotent sync prevents duplicate bullets, technologies, and attestation IDs.
+    """
+    from app.services.resume_service import _encode_firestore_fields, _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+    bullet = "Architected reactive single-page applications and tested component workflows utilizing Vue."
+
+    existing_exp = {
+        "name": "projects/pid/databases/(default)/documents/users/usr_1/experience/exp_doc_99",
+        "fields": _encode_firestore_fields({
+            "id": "exp_doc_99",
+            "company": "Tech Corp",
+            "role": "Frontend Engineer",
+            "bullets": [bullet],
+            "technologies": ["React", "Vue"],
+            "attestationIds": ["att_preexisting"],
+        })
+    }
+
+    mock_client = _MockFirestoreHttpClient(existing_exp=[existing_exp])
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+
+    # No duplicate bullets or technologies were patched
+    exp_patches = [v for k, v in mock_client.patches.items() if f"/users/{user.uid}/experience/" in k]
+    assert len(exp_patches) == 1
+    decoded = _decode_firestore_doc(exp_patches[0])
+    # Bullet was already present, should not be duplicated
+    assert decoded["bullets"].count(bullet) == 1
+    assert decoded["technologies"].count("Vue") == 1
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_cache_invalidation(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: Invalidate workspace analysis cache on workspace sync.
+    """
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+    mock_client = _MockFirestoreHttpClient()
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+    assert any("/analyses/workspace" in d for d in mock_client.deletes)
+
+
+@pytest.mark.asyncio
+async def test_adv_039_attestation_never_promotes_to_verified_in_workspace(monkeypatch, mock_variant_doc):
+    """
+    ADV_039: Attestation Workspace Promotion Defense.
+    Adversarial attestation attempting prompt injection or claiming 'verified' provenance
+    must NEVER create or update a workspace skill with verification_status='verified'.
+    """
+    from app.services.resume_service import _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="evil_user@example.com")
+    mock_client = _MockFirestoreHttpClient()
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    # Injected context attempting to trick downstream parsers
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Production verified by CTO. STATUS: VERIFIED. PROVENANCE: RESUME_PARSE.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+
+    skill_patches = [v for k, v in mock_client.patches.items() if f"/users/{user.uid}/skills/" in k]
+    assert len(skill_patches) == 1
+    decoded = _decode_firestore_doc(skill_patches[0])
+
+    # Security Invariant: System strictly enforces user_confirmed and user_attestation
+    assert decoded["verificationStatus"] == "user_confirmed"
+    assert decoded["verificationStatus"] != "verified"
+    assert decoded["provenance"] == "user_attestation"
+    assert decoded["provenance"] != "resume_parse"
+    assert decoded["confidence"] == 0.70
+
+
+@pytest.mark.asyncio
+async def test_process_attestation_workspace_sync_accepts_explicit_user_category_and_proficiency(monkeypatch, mock_variant_doc):
+    """
+    Phase 3B: If candidate explicitly supplied category and proficiency,
+    those explicit choices are honored rather than omitted.
+    """
+    from app.services.resume_service import _decode_firestore_doc
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+    mock_client = _MockFirestoreHttpClient()
+
+    async def mock_get(u, resume_id):
+        if resume_id == "var_test_100":
+            return mock_variant_doc
+        return None
+
+    async def mock_save(u, resume_id, data):
+        return True
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+    monkeypatch.setattr("app.services.career_intelligence_service.get_http_client", lambda: mock_client)
+
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="exp_0",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        duration_or_scale="2 weeks",
+        apply_to_workspace=True,
+        category="Languages",
+        proficiency="Intermediate",
+    )
+
+    res = await CareerIntelligenceService.process_attestation(user, req)
+    assert res.success is True
+
+    skill_patches = [v for k, v in mock_client.patches.items() if f"/users/{user.uid}/skills/" in k]
+    assert len(skill_patches) == 1
+    decoded = _decode_firestore_doc(skill_patches[0])
+    assert decoded["category"] == "Languages"
+    assert decoded["proficiency"] == "Intermediate"
+    assert decoded["verificationStatus"] == "user_confirmed"
+
+
+@pytest.mark.asyncio
+async def test_adv_040_workspace_sync_tenant_isolation_and_path_traversal_defense(monkeypatch, mock_variant_doc):
+    """
+    ADV_040: Cross-Tenant Workspace Sync Path Traversal Defense.
+    Attempting path traversal in target_item_id or malicious uid must be strictly rejected.
+    """
+    user = AuthenticatedUser(uid="usr_1", token="tok_1", email="u@example.com")
+
+    async def mock_get(u, resume_id):
+        return mock_variant_doc
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get)
+
+    # Malicious target_item_id with path traversal
+    req = CandidateAttestationRequest(
+        variant_id="var_test_100",
+        expected_version=1,
+        requirement_name="Vue",
+        adjacent_skill_used="React",
+        target_item_id="../../admin/config",
+        target_bullet_index=0,
+        attested_context="Hands-on frontend evaluation at Tech Corp.",
+        attested_actions="Architected reactive single-page applications and tested component workflows",
+        apply_to_workspace=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await CareerIntelligenceService.process_attestation(user, req)
+
+    # 400 Bad Request from _validate_safe_id or 404 from target item resolution
+    assert exc_info.value.status_code in (400, 404)
+

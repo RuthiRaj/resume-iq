@@ -142,6 +142,8 @@ class CandidateAttestationRequest(BaseModel):
     duration_or_scale: Optional[str] = Field(default=None, alias="durationOrScale", max_length=100)
     expected_version: Optional[int] = Field(default=None, ge=1, alias="expectedVersion")
     apply_to_workspace: bool = Field(default=False, alias="applyToWorkspace", description="Default False: never mutates root workspace without consent")
+    category: Optional[str] = Field(default=None, max_length=100)
+    proficiency: Optional[str] = Field(default=None, max_length=50)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
@@ -171,6 +173,7 @@ class AttestSkillResponse(BaseModel):
     change_record: ChangeRecord = Field(..., alias="changeRecord")
     new_version: int = Field(..., alias="newVersion")
     validation: ValidationResult
+    workspace_updated: bool = Field(default=False, alias="workspaceUpdated")
     message: str
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)

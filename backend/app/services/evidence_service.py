@@ -161,7 +161,11 @@ class EvidenceService:
                     sourceType="skills",
                     sourceItemId=item_id,
                     title=norm_name,
-                    description=f"{skill.proficiency} proficiency in {norm_name} ({norm_cat})",
+                    description=(
+                        f"{skill.proficiency} proficiency in {norm_name} ({norm_cat})"
+                        if skill.proficiency
+                        else f"{norm_name} ({norm_cat})"
+                    ),
                     skills=[norm_name],
                     technologies=[norm_name] if norm_cat in ("Language", "Framework", "Database", "Cloud", "DevOps", "Tool") else [],
                     responsibilities=[],

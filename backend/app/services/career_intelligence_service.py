@@ -29,11 +29,20 @@ from app.schemas.variant import (
     ChangeRecord,
 )
 from app.schemas.remediation import ValidationResult, UnsupportedClaim
-from app.ai.skills import normalize_skill_name
+from app.ai.skills import normalize_skill_name, normalize_skill_category
 from app.ai.career.bridge_engine import BridgeEngine
 from app.ai.career.remediation_blueprints import GapRemediationEngine
 from app.ai.claim_validator import validate_claims_against_source
-from app.services.variant_service import VariantService, _resolve_target_item
+from app.services.variant_service import VariantService, _resolve_target_item, _validate_safe_id
+from app.services.resume_service import (
+    _get_firestore_base_url,
+    get_http_client,
+    _decode_firestore_doc,
+    _encode_firestore_fields,
+)
+from app.core.logging import get_logger
+
+logger = get_logger("app.services.career_intelligence")
 
 
 class CareerIntelligenceService:
@@ -132,7 +141,7 @@ class CareerIntelligenceService:
                 original_bullet = proj_item.highlights[bullet_idx]
             elif proj_item.highlights:
                 original_bullet = proj_item.highlights[0]
-            item_techs = set(proj_item.technologies)
+            item_techs = set(proj_item.tech_stack)
             item_title = proj_item.title
         else:
             section = "Experience"
@@ -209,6 +218,17 @@ class CareerIntelligenceService:
             req=apply_req,
         )
 
+        # 8. Synchronize to Master Workspace if explicitly requested by candidate
+        workspace_updated = False
+        if req.apply_to_workspace:
+            workspace_updated = await cls._sync_attestation_to_workspace(
+                user=user,
+                req=req,
+                attestation_id=attestation_id,
+                proposed_bullet=proposed_bullet,
+                section=section,
+            )
+
         return AttestSkillResponse(
             success=True,
             attestationId=attestation_id,
@@ -217,5 +237,218 @@ class CareerIntelligenceService:
             changeRecord=change_rec,
             newVersion=updated_variant.version,
             validation=val_res,
-            message=f"Successfully attested and applied '{req.requirement_name}' to variant v{updated_variant.version}.",
+            workspaceUpdated=workspace_updated,
+            message=f"Successfully attested and applied '{req.requirement_name}' to variant v{updated_variant.version}."
+            + (" Synced to Master Workspace." if workspace_updated else ""),
         )
+
+    @classmethod
+    async def _sync_attestation_to_workspace(
+        cls,
+        user: AuthenticatedUser,
+        req: CandidateAttestationRequest,
+        attestation_id: str,
+        proposed_bullet: str,
+        section: str,
+    ) -> bool:
+        """
+        Synchronizes an approved candidate attestation into the authenticated user's Master Career Workspace.
+        Guarantees:
+        - 100% tenant isolation (paths strictly under users/{user.uid})
+        - Never promotes attestation to 'verified' (skill is 'user_confirmed', provenance='user_attestation')
+        - Never downgrades existing 'verified' skills
+        - Does NOT invent fake proficiency ("Intermediate") or fake years (1 year)
+        - Preserves existing experience/project evidence and attributes new content to attestation_id
+        - Idempotent against duplicate sync requests
+        """
+        base_url = f"{_get_firestore_base_url()}/users/{user.uid}"
+        headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
+        client = get_http_client()
+        norm_req_name = normalize_skill_name(req.requirement_name)
+
+        # 1. Synchronize Skill into users/{uid}/skills
+        try:
+            skills_res = await client.get(f"{base_url}/skills", headers=headers, timeout=25.0)
+            existing_skills: List[Dict[str, Any]] = []
+            if skills_res.status_code == 200:
+                docs = skills_res.json().get("documents", [])
+                existing_skills = [_decode_firestore_doc(d) for d in docs]
+
+            matched_skill = None
+            for s in existing_skills:
+                if normalize_skill_name(s.get("name", "")) == norm_req_name:
+                    matched_skill = s
+                    break
+
+            if matched_skill:
+                # Skill already exists in workspace
+                cur_status = matched_skill.get("verificationStatus", "verified")
+                if cur_status == "verified":
+                    # PRESERVE VERIFIED STATUS: never downgrade verified to user_confirmed
+                    pass
+                else:
+                    # Update status to user_confirmed and set provenance, preserving existing proficiency/years
+                    skill_id = matched_skill.get("id") or matched_skill.get("name", "").split("/")[-1]
+                    patch_payload: Dict[str, Any] = {
+                        "name": matched_skill.get("name") or req.requirement_name,
+                        "verificationStatus": "user_confirmed",
+                        "provenance": "user_attestation",
+                        "confidence": 0.70,
+                        "sourceDocumentId": attestation_id,
+                        "sourceContext": f"{req.attested_context}: {req.attested_actions}",
+                    }
+                    if req.category:
+                        patch_payload["category"] = req.category
+                    elif matched_skill.get("category"):
+                        patch_payload["category"] = matched_skill["category"]
+                    else:
+                        patch_payload["category"] = normalize_skill_category(norm_req_name, "Other")
+
+                    if req.proficiency:
+                        patch_payload["proficiency"] = req.proficiency
+                    elif matched_skill.get("proficiency"):
+                        patch_payload["proficiency"] = matched_skill["proficiency"]
+
+                    if matched_skill.get("yearsOfExperience") is not None:
+                        patch_payload["yearsOfExperience"] = matched_skill["yearsOfExperience"]
+
+                    doc_url = f"{base_url}/skills/{skill_id}"
+                    fields_body = {"fields": _encode_firestore_fields(patch_payload)}
+                    await client.patch(doc_url, headers=headers, json=fields_body, timeout=25.0)
+            else:
+                # Create new skill with ONLY supported info (NO fabricated Intermediate, NO fabricated 1 year)
+                new_skill_id = f"skill_{uuid.uuid4().hex[:8]}"
+                new_payload: Dict[str, Any] = {
+                    "name": req.requirement_name,
+                    "verificationStatus": "user_confirmed",
+                    "provenance": "user_attestation",
+                    "confidence": 0.70,
+                    "sourceDocumentId": attestation_id,
+                    "sourceContext": f"{req.attested_context}: {req.attested_actions}",
+                    "category": req.category or normalize_skill_category(norm_req_name, "Other"),
+                }
+                if req.proficiency:
+                    new_payload["proficiency"] = req.proficiency
+
+                doc_url = f"{base_url}/skills/{new_skill_id}"
+                fields_body = {"fields": _encode_firestore_fields(new_payload)}
+                await client.patch(doc_url, headers=headers, json=fields_body, timeout=25.0)
+
+        except Exception as e:
+            logger.warning(f"Failed to synchronize skill '{req.requirement_name}' to workspace: {e}")
+
+        # 2. Synchronize Experience or Project Item
+        try:
+            target_id = req.target_item_id.strip()
+            _validate_safe_id(target_id, "target_item_id")
+
+            if section == "Project" or target_id.startswith("proj"):
+                proj_res = await client.get(f"{base_url}/projects", headers=headers, timeout=25.0)
+                if proj_res.status_code == 200:
+                    docs = proj_res.json().get("documents", [])
+                    existing_proj = [_decode_firestore_doc(d) for d in docs]
+                    matched_proj = next((p for p in existing_proj if p.get("id") == target_id), None)
+                    if not matched_proj and target_id.startswith("proj_"):
+                        try:
+                            idx = int(target_id.split("_")[1])
+                            if 0 <= idx < len(existing_proj):
+                                matched_proj = existing_proj[idx]
+                        except Exception:
+                            pass
+
+                    if matched_proj:
+                        proj_id = matched_proj.get("id")
+                        highlights = list(matched_proj.get("highlights", []))
+                        tech_stack = list(matched_proj.get("techStack", matched_proj.get("technologies", [])))
+                        attestation_ids = list(matched_proj.get("attestationIds", matched_proj.get("remediationIds", [])))
+
+                        updated = False
+                        if proposed_bullet not in highlights:
+                            highlights.append(proposed_bullet)
+                            updated = True
+                        if req.requirement_name not in tech_stack:
+                            tech_stack.append(req.requirement_name)
+                            updated = True
+                        if attestation_id not in attestation_ids:
+                            attestation_ids.append(attestation_id)
+                            updated = True
+
+                        if updated:
+                            patch_proj = {
+                                "title": matched_proj.get("title", ""),
+                                "role": matched_proj.get("role", ""),
+                                "description": matched_proj.get("description", ""),
+                                "highlights": highlights,
+                                "techStack": tech_stack,
+                                "attestationIds": attestation_ids,
+                            }
+                            if matched_proj.get("sourceDocumentId"):
+                                patch_proj["sourceDocumentId"] = matched_proj["sourceDocumentId"]
+                            if matched_proj.get("verificationStatus"):
+                                patch_proj["verificationStatus"] = matched_proj["verificationStatus"]
+
+                            doc_url = f"{base_url}/projects/{proj_id}"
+                            fields_body = {"fields": _encode_firestore_fields(patch_proj)}
+                            await client.patch(doc_url, headers=headers, json=fields_body, timeout=25.0)
+
+            elif section == "Experience" or target_id.startswith("exp"):
+                exp_res = await client.get(f"{base_url}/experience", headers=headers, timeout=25.0)
+                if exp_res.status_code == 200:
+                    docs = exp_res.json().get("documents", [])
+                    existing_exp = [_decode_firestore_doc(d) for d in docs]
+                    matched_exp = next((e for e in existing_exp if e.get("id") == target_id), None)
+                    if not matched_exp and target_id.startswith("exp_"):
+                        try:
+                            idx = int(target_id.split("_")[1])
+                            if 0 <= idx < len(existing_exp):
+                                matched_exp = existing_exp[idx]
+                        except Exception:
+                            pass
+
+                    if matched_exp:
+                        exp_id = matched_exp.get("id")
+                        bullets = list(matched_exp.get("bullets", []))
+                        technologies = list(matched_exp.get("technologies", []))
+                        attestation_ids = list(matched_exp.get("attestationIds", matched_exp.get("remediationIds", [])))
+
+                        updated = False
+                        if proposed_bullet not in bullets:
+                            bullets.append(proposed_bullet)
+                            updated = True
+                        if req.requirement_name not in technologies:
+                            technologies.append(req.requirement_name)
+                            updated = True
+                        if attestation_id not in attestation_ids:
+                            attestation_ids.append(attestation_id)
+                            updated = True
+
+                        if updated:
+                            patch_exp = {
+                                "company": matched_exp.get("company", ""),
+                                "role": matched_exp.get("role", ""),
+                                "location": matched_exp.get("location", ""),
+                                "startDate": matched_exp.get("startDate", ""),
+                                "endDate": matched_exp.get("endDate", ""),
+                                "bullets": bullets,
+                                "technologies": technologies,
+                                "attestationIds": attestation_ids,
+                            }
+                            if matched_exp.get("sourceDocumentId"):
+                                patch_exp["sourceDocumentId"] = matched_exp["sourceDocumentId"]
+                            if matched_exp.get("verificationStatus"):
+                                patch_exp["verificationStatus"] = matched_exp["verificationStatus"]
+
+                            doc_url = f"{base_url}/experience/{exp_id}"
+                            fields_body = {"fields": _encode_firestore_fields(patch_exp)}
+                            await client.patch(doc_url, headers=headers, json=fields_body, timeout=25.0)
+
+        except Exception as e:
+            logger.warning(f"Failed to synchronize experience/project to workspace: {e}")
+
+        # 3. Invalidate workspace analysis cache so subsequent analysis authoritatively re-evaluates fresh workspace evidence
+        try:
+            await client.delete(f"{base_url}/analyses/workspace", headers=headers, timeout=10.0)
+        except Exception:
+            pass
+
+        return True

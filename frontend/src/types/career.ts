@@ -74,6 +74,8 @@ export interface CandidateAttestationRequest {
   durationOrScale?: string;
   expectedVersion?: number;
   applyToWorkspace: boolean;
+  category?: string;
+  proficiency?: string;
 }
 
 export interface AttestSkillResponse {
@@ -92,6 +94,7 @@ export interface AttestSkillResponse {
       reason: string;
     }>;
   };
+  workspaceUpdated?: boolean;
   message: string;
 }
 

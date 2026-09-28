@@ -41,6 +41,7 @@ export function BridgeAttestationModal({
   const [attestedActions, setAttestedActions] = useState("");
   const [durationOrScale, setDurationOrScale] = useState("");
   const [confirmedTruthful, setConfirmedTruthful] = useState(false);
+  const [syncToWorkspace, setSyncToWorkspace] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -70,7 +71,7 @@ export function BridgeAttestationModal({
       attestedActions: attestedActions.trim(),
       durationOrScale: durationOrScale.trim() || undefined,
       expectedVersion: variantVersion,
-      applyToWorkspace: false,
+      applyToWorkspace: syncToWorkspace,
     };
 
     try {
@@ -208,6 +209,20 @@ export function BridgeAttestationModal({
             <span className="font-semibold text-slate-100">Zero-Hallucination Attestation:</span> I confirm that I have
             genuine, real-world experience performing the actions described above. This change will be validated by ClaimValidator
             and recorded in the variant change ledger.
+          </label>
+        </div>
+
+        {/* Workspace Synchronization Opt-In */}
+        <div className="bg-slate-900 border border-slate-800 rounded p-3 flex items-start space-x-3">
+          <input
+            type="checkbox"
+            id="sync-workspace"
+            checked={syncToWorkspace}
+            onChange={(e) => setSyncToWorkspace(e.target.checked)}
+            className="mt-0.5 h-4 w-4 rounded border-slate-700 text-primary-600 focus:ring-primary-500"
+          />
+          <label htmlFor="sync-workspace" className="text-xs text-slate-300 leading-normal cursor-pointer">
+            <span className="font-semibold text-slate-100">Sync to Master Career Workspace:</span> Record this attested skill and accomplishment in your Master Career Workspace as a candidate-attested record (never auto-promoted to verified).
           </label>
         </div>
 
