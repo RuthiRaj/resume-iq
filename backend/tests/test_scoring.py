@@ -43,3 +43,34 @@ def test_reconcile_score_breakdown_helper():
     # 75*0.4 (30) + 80*0.3 (24) + 65*0.15 (9.75) + 90*0.15 (13.5) = 77.25 -> 77
     score = reconcile_score_breakdown(breakdown)
     assert score == 77
+
+
+def test_scoring_and_evidence_pipeline_with_none_proficiency():
+    """
+    Verifies that skill items with proficiency=None (omitted default) work cleanly
+    across evidence construction, ATS scoring breakdowns, and deterministic calculations.
+    """
+    from app.schemas.candidate import CandidateEvidence, SkillItem
+    from app.services.evidence_service import EvidenceService
+
+    evidence = CandidateEvidence(
+        headline="Full Stack Engineer",
+        summary="Experienced engineer with backend skills.",
+        skills=[
+            SkillItem(name="Python", category="Language", proficiency=None, verification_status="verified"),
+            SkillItem(name="TypeScript", category="Language", proficiency=None, verification_status="unverified"),
+        ],
+    )
+
+    # 1. Verify EvidenceService converts proficiency=None skills into clean text representations
+    evidence_items = EvidenceService.normalize_candidate_evidence("usr_test_scoring", evidence)
+    assert len(evidence_items) >= 2
+    skill_descriptions = [item.description for item in evidence_items if item.source_type == "skills"]
+    assert "Python (Language)" in skill_descriptions
+    assert "TypeScript (Language)" in skill_descriptions
+
+    # 2. Verify ATS scoring breakdown calculations remain deterministic and valid
+    breakdown = ScoreBreakdown(relevance=85, keywords=90, metrics=70, formatting=80)
+    score = reconcile_score_breakdown(breakdown)
+    assert score == 84
+    assert 0 <= score <= 100
