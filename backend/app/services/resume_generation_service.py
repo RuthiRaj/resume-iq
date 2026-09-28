@@ -25,6 +25,7 @@ from app.schemas.variant import (
 from app.schemas.plan import ResumePlan
 from app.services.resume_service import ResumeService
 from app.services.variant_service import VariantService
+from app.services.evidence_hash import compute_workspace_evidence_hash
 from app.services.evidence_service import EvidenceService
 from app.services.evidence_graph_service import CareerEvidenceGraph
 from app.services.resume_planning_service import ResumePlanningService
@@ -236,6 +237,7 @@ class ResumeGenerationService:
         user: AuthenticatedUser,
         req: GenerateResumeRequest,
         provider: Optional[AiAnalyzerProvider] = None,
+        persist: bool = True,
     ) -> TargetedResumeVariant:
         t_total_start = time.perf_counter()
 
@@ -717,13 +719,37 @@ class ResumeGenerationService:
                 final_proj.append(proj.model_copy(update={"bullets": new_bullets}))
 
         # 10. Create targeted resume variant fork
-        create_variant_req = CreateTargetedVariantRequest(
-            master_resume_id="workspace",
-            target_role=req.target_role,
-            target_company=req.target_company or "",
-            job_description=req.job_description or "",
-        )
-        variant = await VariantService.create_targeted_variant(user, create_variant_req)
+        if persist:
+            create_variant_req = CreateTargetedVariantRequest(
+                master_resume_id="workspace",
+                target_role=req.target_role,
+                target_company=req.target_company or "",
+                job_description=req.job_description or "",
+            )
+            variant = await VariantService.create_targeted_variant(user, create_variant_req)
+        else:
+            variant_id = f"var_{uuid.uuid4().hex[:12]}"
+            title = f"Targeted: {req.target_role}" + (f" @ {req.target_company}" if req.target_company else "")
+            variant = TargetedResumeVariant(
+                variant_id=variant_id,
+                master_resume_id="workspace",
+                title=title,
+                target_role=req.target_role,
+                target_company=req.target_company or "",
+                job_description=req.job_description or "",
+                job_description_hash=hash_job_description(req.job_description or ""),
+                version=1,
+                is_targeted_variant=True,
+                snapshot=candidate_evidence,
+                change_ledger=[],
+                created_at=now_iso,
+                updated_at=now_iso,
+            )
+
+        # Anchor the raw workspace evidence hash on the generated variant so
+        # downstream workspace-sync checks can detect workspace drift.
+        variant.workspace_snapshot_hash = compute_workspace_evidence_hash(candidate_evidence)
+        variant.last_synced_at = datetime.now(timezone.utc).isoformat()
 
         # 11. Update variant with the selected, tailored, validated evidence and change ledger
         updated_evidence = candidate_evidence.model_copy(
@@ -860,21 +886,22 @@ class ResumeGenerationService:
             variant.score_delta = None
 
         # 12. Persist the customized snapshot and change ledger to Firestore
-        doc_payload = variant.model_dump(by_alias=True)
-        doc_payload["score"] = variant.current_score or 0
-        doc_payload["atsScore"] = variant.current_score or 0
-        doc_payload["template"] = "ats"
-        doc_payload["lastEdited"] = now_iso
-        doc_payload["jobDescription"] = req.job_description or ""
-        doc_payload["provider"] = provider_name
-        doc_payload["model"] = resolved_model
-        doc_payload["generationMetadata"] = variant.generation_metadata
+        if persist:
+            doc_payload = variant.model_dump(by_alias=True)
+            doc_payload["score"] = variant.current_score or 0
+            doc_payload["atsScore"] = variant.current_score or 0
+            doc_payload["template"] = "ats"
+            doc_payload["lastEdited"] = now_iso
+            doc_payload["jobDescription"] = req.job_description or ""
+            doc_payload["provider"] = provider_name
+            doc_payload["model"] = resolved_model
+            doc_payload["generationMetadata"] = variant.generation_metadata
 
-        saved = await ResumeService.save_resume_snapshot(user, variant.variant_id, doc_payload)
-        if not saved:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to persist generated targeted resume variant to database.",
-            )
+            saved = await ResumeService.save_resume_snapshot(user, variant.variant_id, doc_payload)
+            if not saved:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to persist generated targeted resume variant to database.",
+                )
 
         return variant

@@ -13,6 +13,7 @@ from app.schemas.variant import (
     FitComparisonResponse,
     ExportTargetedResumeResponse,
     ChangeRecord,
+    SyncStatusResponse,
 )
 from app.services.variant_service import VariantService
 from app.services.resume_generation_service import ResumeGenerationService
@@ -80,6 +81,39 @@ async def create_variant_endpoint(
     current_user: AuthenticatedUser = Depends(get_authenticated_user),
 ) -> TargetedResumeVariant:
     return await VariantService.create_targeted_variant(current_user, req)
+
+
+@router.get(
+    "/{variant_id}/sync-status",
+    response_model=SyncStatusResponse,
+    summary="Check whether a workspace-sourced variant is in sync with live workspace evidence",
+)
+async def variant_sync_status_endpoint(
+    variant_id: str = Path(..., pattern=VARIANT_ID_PATTERN, description="Variant ID"),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+) -> SyncStatusResponse:
+    return await VariantService.get_workspace_sync_status(current_user, variant_id)
+
+
+@router.post(
+    "/{variant_id}/resync",
+    summary="Resync a workspace-sourced variant with updated workspace evidence",
+)
+async def resync_variant_endpoint(
+    variant_id: str = Path(..., pattern=VARIANT_ID_PATTERN, description="Variant ID"),
+    current_user: AuthenticatedUser = Depends(get_authenticated_user),
+):
+    await resume_generation_limiter.check(current_user.uid)
+    try:
+        return await asyncio.wait_for(
+            VariantService.resync_variant_with_workspace(current_user, variant_id),
+            timeout=90.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Resume resync timed out after 90 seconds. Please try again.",
+        )
 
 
 @router.get(

@@ -197,6 +197,8 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             technologies=d.get("technologies", []),
             source_document_id=d.get("sourceDocumentId"),
             source_document_name=d.get("sourceDocumentName"),
+            verification_status=d.get("verificationStatus", "verified"),
+            confidence=d.get("confidence"),
         )
         for i, d in enumerate(exp_docs)
     ]
@@ -211,6 +213,8 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             tech_stack=d.get("techStack", []),
             source_document_id=d.get("sourceDocumentId"),
             source_document_name=d.get("sourceDocumentName"),
+            verification_status=d.get("verificationStatus", "verified"),
+            confidence=d.get("confidence"),
         )
         for i, d in enumerate(proj_docs)
     ]
@@ -220,9 +224,14 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             id=d.get("id", f"skill_{i}"),
             name=d.get("name", ""),
             category=d.get("category", "Technical"),
-            proficiency=d.get("proficiency", "Intermediate"),
+            proficiency=d.get("proficiency"),
+            years_of_experience=d.get("yearsOfExperience"),
             source_document_id=d.get("sourceDocumentId"),
             source_document_name=d.get("sourceDocumentName"),
+            verification_status=d.get("verificationStatus", "verified"),
+            confidence=d.get("confidence"),
+            provenance=d.get("provenance"),
+            source_context=d.get("sourceContext"),
         )
         for i, d in enumerate(skill_docs)
     ]
@@ -235,6 +244,8 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             field_of_study=d.get("fieldOfStudy", ""),
             source_document_id=d.get("sourceDocumentId"),
             source_document_name=d.get("sourceDocumentName"),
+            verification_status=d.get("verificationStatus", "verified"),
+            confidence=d.get("confidence"),
         )
         for i, d in enumerate(edu_docs)
     ]
@@ -246,6 +257,8 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             issuer=d.get("issuer", ""),
             source_document_id=d.get("sourceDocumentId"),
             source_document_name=d.get("sourceDocumentName"),
+            verification_status=d.get("verificationStatus", "verified"),
+            confidence=d.get("confidence"),
         )
         for i, d in enumerate(cert_docs)
     ]
@@ -260,6 +273,8 @@ async def load_master_profile(user: AuthenticatedUser) -> CandidateEvidence:
             url=d.get("url", ""),
             source_document_id=d.get("sourceDocumentId"),
             source_document_name=d.get("sourceDocumentName"),
+            verification_status=d.get("verificationStatus", "verified"),
+            confidence=d.get("confidence"),
         )
         for i, d in enumerate(ach_docs)
     ]
