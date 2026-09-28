@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useMemo, useDeferredValue, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useCareer, ResumeItem, ResumeSnapshot } from "@/lib/store";
@@ -96,6 +96,7 @@ function BuilderContent() {
   const [customSummary, setCustomSummary] = useState(
     existingResume?.sections.summary || profile.summary
   );
+  const deferredCustomSummary = useDeferredValue(customSummary);
 
   // Selected entities included in this resume
   const [selectedExpIds, setSelectedExpIds] = useState<string[]>(
@@ -299,43 +300,72 @@ function BuilderContent() {
   };
 
   // Merge live entities with snapshot entities to prevent losing historical entities if deleted from master profile
-  const allAvailableExp = [
+  const allAvailableExp = useMemo(() => [
     ...experience,
     ...(existingResume?.snapshot?.experience?.filter(
       (se) => se.id && !experience.some((e) => e.id === se.id)
     ) || []),
-  ];
+  ], [experience, existingResume?.snapshot?.experience]);
 
-  const allAvailableProj = [
+  const allAvailableProj = useMemo(() => [
     ...projects,
     ...(existingResume?.snapshot?.projects?.filter(
       (sp) => sp.id && !projects.some((p) => p.id === sp.id)
     ) || []),
-  ];
+  ], [projects, existingResume?.snapshot?.projects]);
 
-  const activeExpList = allAvailableExp.filter((e) => e.id && selectedExpIds.includes(e.id));
-  const activeProjList = allAvailableProj.filter((p) => p.id && selectedProjIds.includes(p.id));
+  const activeExpList = useMemo(
+    () => allAvailableExp.filter((e) => e.id && selectedExpIds.includes(e.id)),
+    [allAvailableExp, selectedExpIds]
+  );
+  const activeProjList = useMemo(
+    () => allAvailableProj.filter((p) => p.id && selectedProjIds.includes(p.id)),
+    [allAvailableProj, selectedProjIds]
+  );
 
   // Prioritize snapshot entity content for existing resumes until re-saved
-  const renderProjList = activeProjList.map((p) => {
-    const snapItem = existingResume?.snapshot?.projects?.find((sp) => sp.id === p.id);
-    return snapItem || p;
-  });
+  const renderProjList = useMemo(
+    () =>
+      activeProjList.map((p) => {
+        const snapItem = existingResume?.snapshot?.projects?.find((sp) => sp.id === p.id);
+        return snapItem || p;
+      }),
+    [activeProjList, existingResume?.snapshot?.projects]
+  );
 
-  const renderExpList = activeExpList.map((e) => {
-    const snapItem = existingResume?.snapshot?.experience?.find((se) => se.id === e.id);
-    return snapItem || e;
-  });
+  const renderExpList = useMemo(
+    () =>
+      activeExpList.map((e) => {
+        const snapItem = existingResume?.snapshot?.experience?.find((se) => se.id === e.id);
+        return snapItem || e;
+      }),
+    [activeExpList, existingResume?.snapshot?.experience]
+  );
 
-  const resumeDataForRender = {
-    profile: existingResume?.snapshot?.profile || profile,
-    education: existingResume?.snapshot?.education || education,
-    skills: existingResume?.snapshot?.skills || skills,
-    projects: renderProjList.length > 0 ? renderProjList : projects,
-    experience: renderExpList.length > 0 ? renderExpList : experience,
-    certifications: existingResume?.snapshot?.certifications || certifications,
-    customSummary,
-  };
+  const resumeDataForRender = useMemo(
+    () => ({
+      profile: existingResume?.snapshot?.profile || profile,
+      education: existingResume?.snapshot?.education || education,
+      skills: existingResume?.snapshot?.skills || skills,
+      projects: renderProjList.length > 0 ? renderProjList : projects,
+      experience: renderExpList.length > 0 ? renderExpList : experience,
+      certifications: existingResume?.snapshot?.certifications || certifications,
+      customSummary: deferredCustomSummary,
+    }),
+    [
+      existingResume?.snapshot,
+      profile,
+      education,
+      skills,
+      projects,
+      experience,
+      certifications,
+      renderProjList,
+      renderExpList,
+      deferredCustomSummary,
+    ]
+  );
+
 
   return (
     <div className="space-y-6">
