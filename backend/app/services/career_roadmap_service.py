@@ -56,8 +56,12 @@ from app.services.resume_service import (
 from app.services.variant_service import VariantService
 from app.services.career_intelligence_service import CareerIntelligenceService
 from app.services.ingestion_service import IngestionService
+from app.services.evidence_service import EvidenceService
+from app.services.evidence_graph_service import CareerEvidenceGraph
 from app.ai.skills import normalize_skill_name
+from app.ai.retrieval.hybrid_matcher import HybridMatcher
 from app.ai.career.roadmap_generator import RoadmapGenerator
+from app.core.security import hash_job_description
 
 
 # Allowed State Transition Map
@@ -88,10 +92,11 @@ class CareerRoadmapService:
         """
         candidate_evidence: CandidateEvidence
         target_role: str
-        target_company: str = req.target_company or ""
+        target_company: str = (req.target_company or "").strip()
         missing_reqs: List[RequirementMatch] = []
         source_variant_id: Optional[str] = req.variant_id
         source_analysis_score: Optional[int] = None
+        jd_hash: Optional[str] = None
 
         if req.variant_id:
             variant = await VariantService.get_targeted_variant(user, req.variant_id)
@@ -101,14 +106,81 @@ class CareerRoadmapService:
             source_analysis_score = variant.current_score or variant.baseline_score
             matches = variant.current_matches or variant.baseline_matches or []
             missing_reqs = [m for m in matches if m.match_status in ("Missing", "PartialMatch")]
+            jd_hash = variant.job_description_hash or (hash_job_description(req.job_description) if req.job_description else None)
         else:
             if not req.target_role or not req.target_role.strip():
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Target role is required when generating a roadmap without a variantId.",
                 )
+            if not req.job_description or not req.job_description.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Job description is required to generate a JD-driven roadmap when variantId is not provided.",
+                )
             target_role = req.target_role.strip()
             candidate_evidence = await load_master_profile(user)
+            jd_hash = hash_job_description(req.job_description)
+
+            # 1. Deterministic JD parsing
+            structured_jd = HybridMatcher.parse_job_description_deterministic(
+                target_role=target_role,
+                job_description_text=req.job_description,
+                target_company=target_company,
+            )
+
+            # 2. Normalize Master Workspace evidence
+            evidence_items = EvidenceService.normalize_candidate_evidence(
+                user_id=user.uid,
+                evidence=candidate_evidence,
+            )
+
+            # 3. Build CareerEvidenceGraph
+            evidence_graph = CareerEvidenceGraph(user_id=user.uid, items=evidence_items)
+
+            # 4. Deterministic hybrid matching
+            match_response = HybridMatcher.match_job_requirements(structured_jd, evidence_graph)
+
+            # 5. Extract missing, partial, and user_confirmation requirements
+            for m in match_response.matches:
+                cat = m.category if m.category in ("Language", "Framework", "Database", "Cloud", "DevOps", "Tool", "SoftSkill", "Domain", "Other") else "Other"
+                imp = m.importance if m.importance in ("MustHave", "Preferred", "Unspecified") else "MustHave"
+
+                if m.match_class in ("direct_match", "semantic_match"):
+                    continue  # Verified direct evidence already satisfies this requirement
+                elif m.match_class == "related_but_unverified":
+                    missing_reqs.append(
+                        RequirementMatch(
+                            requirementName=m.requirement_name,
+                            category=cat,  # type: ignore
+                            importance=imp,  # type: ignore
+                            matchStatus="PartialMatch",
+                            gapReason=m.explanation or f"Related technology found, but {m.requirement_name} requires direct experience.",
+                            gapType="AdjacentTechnology",
+                        )
+                    )
+                elif m.match_class == "user_confirmation_required":
+                    missing_reqs.append(
+                        RequirementMatch(
+                            requirementName=m.requirement_name,
+                            category=cat,  # type: ignore
+                            importance=imp,  # type: ignore
+                            matchStatus="PartialMatch",
+                            gapReason=m.explanation or f"'{m.requirement_name}' is user-attested in workspace, but lacks verified project/workplace evidence.",
+                            gapType="InsufficientContext",
+                        )
+                    )
+                elif m.match_class == "missing":
+                    missing_reqs.append(
+                        RequirementMatch(
+                            requirementName=m.requirement_name,
+                            category=cat,  # type: ignore
+                            importance=imp,  # type: ignore
+                            matchStatus="Missing",
+                            gapReason=m.explanation or f"No verified evidence found for {m.requirement_name} in candidate workspace.",
+                            gapType="MissingEvidence",
+                        )
+                    )
 
         roadmap = RoadmapGenerator.generate_roadmap(
             user_id=user.uid,
@@ -118,6 +190,7 @@ class CareerRoadmapService:
             missing_requirements=missing_reqs,
             source_variant_id=source_variant_id,
             source_analysis_score=source_analysis_score,
+            job_description_hash=jd_hash,
         )
 
         # Persist to Firestore: users/{uid}/roadmaps/{roadmapId}

@@ -3166,3 +3166,380 @@ def test_adv_073_free_product_integrity_milestone_5():
         source = inspect.getsource(mod).lower()
         for term in forbidden:
             assert term not in source, f"Forbidden monetization term '{term}' found in {mod.__name__}"
+
+
+# ---------------------------------------------------------------------------
+# 10. Phase 3C: Standalone JD -> Career Roadmap Test Suite
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_empty_jd_raises_400():
+    """Phase 3C: Generating a roadmap without variant_id and without job_description raises HTTP 400."""
+    user = AuthenticatedUser(uid="usr_3c_1", token="tok_1", email="u@example.com")
+    req = GenerateRoadmapRequest(
+        targetRole="Platform Engineer",
+        jobDescription="",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await CareerRoadmapService.generate_roadmap(user, req)
+    assert exc_info.value.status_code == 400
+    assert "Job description is required" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_empty_target_role_raises_400():
+    """Phase 3C: Generating a roadmap without target_role raises HTTP 400."""
+    user = AuthenticatedUser(uid="usr_3c_1", token="tok_1", email="u@example.com")
+    req = GenerateRoadmapRequest(
+        targetRole="",
+        jobDescription="We are hiring a backend engineer with Python and Docker.",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await CareerRoadmapService.generate_roadmap(user, req)
+    assert exc_info.value.status_code == 400
+    assert "Target role is required" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_generation_actual_service_path(monkeypatch):
+    """
+    Phase 3C (Original P0 Defect Fix):
+    Proves that CareerRoadmapService.generate_roadmap() extracts requirements from a standalone JD,
+    matches against current Master Workspace evidence, and generates non-empty grounded milestones.
+    """
+    from app.core.security import hash_job_description
+    user = AuthenticatedUser(uid="usr_p0_fix", token="tok_p0", email="dev@example.com")
+
+    # Master workspace with React & TypeScript
+    master_evidence = CandidateEvidence(
+        experience=[
+            ExperienceItem(
+                id="exp_0",
+                role="Frontend Engineer",
+                company="Acme Corp",
+                technologies=["React", "TypeScript"],
+                bullets=["Built client dashboards with React."],
+            )
+        ],
+        skills=[
+            SkillItem(name="React", category="Technical", verificationStatus="verified"),
+            SkillItem(name="TypeScript", category="Technical", verificationStatus="verified"),
+        ],
+    )
+
+    saved_payloads = []
+    async def mock_load_master(u):
+        return master_evidence
+
+    async def mock_save_doc(u, rid, data):
+        saved_payloads.append(data)
+        return True
+
+    monkeypatch.setattr("app.services.career_roadmap_service.load_master_profile", mock_load_master)
+    monkeypatch.setattr(CareerRoadmapService, "_save_roadmap_doc", mock_save_doc)
+
+    jd_text = """
+    We are seeking a Senior DevOps Engineer at Stripe.
+    Requirements:
+    - Experience with Docker containerization
+    - Hands-on Kubernetes cluster orchestration
+    - AWS cloud infrastructure provisioning
+    - Infrastructure as Code with Terraform
+    """
+
+    req = GenerateRoadmapRequest(
+        targetRole="Senior DevOps Engineer",
+        targetCompany="Stripe",
+        jobDescription=jd_text,
+    )
+
+    plan = await CareerRoadmapService.generate_roadmap(user, req)
+
+    # 1. Invariant: Valid Roadmap Plan generated
+    assert plan.user_id == "usr_p0_fix"
+    assert plan.target_role == "Senior DevOps Engineer"
+    assert plan.target_company == "Stripe"
+    assert plan.source_variant_id is None
+    expected_jd_hash = hash_job_description(jd_text)
+    assert plan.job_description_hash == expected_jd_hash
+    assert plan.provenance is not None
+    assert plan.provenance.job_description_hash == expected_jd_hash
+
+    # 2. Invariant: Original P0 Fixed - Milestones are NON-EMPTY
+    assert plan.total_milestones > 0
+    assert len(plan.milestones) > 0
+
+    # 3. Invariant: Requirement coverage
+    req_names = {m.requirement_name.lower() for m in plan.milestones}
+    # Should include missing DevOps technologies from the JD
+    assert any("kubernetes" in r or "docker" in r or "aws" in r or "terraform" in r for r in req_names)
+
+    # 4. Invariant: Saved to Firestore
+    assert len(saved_payloads) == 1
+    assert saved_payloads[0]["jobDescriptionHash"] == expected_jd_hash
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_transferable_bridge_generation(monkeypatch):
+    """Phase 3C: Standalone JD discovers transferable bridges when candidate has adjacent verified skill."""
+    user = AuthenticatedUser(uid="usr_bridge", token="tok_b", email="bridge@example.com")
+
+    # Candidate has Docker in workspace experience (adjacent to Kubernetes)
+    master_evidence = CandidateEvidence(
+        experience=[
+            ExperienceItem(
+                id="exp_docker",
+                role="DevOps Specialist",
+                company="Container Co",
+                technologies=["Docker"],
+                bullets=["Containerized applications using Docker and Docker Compose."],
+            )
+        ],
+        skills=[
+            SkillItem(name="Docker", category="Technical", verificationStatus="verified"),
+        ],
+    )
+
+    async def mock_load_master(u):
+        return master_evidence
+
+    async def mock_save_doc(u, rid, data):
+        return True
+
+    monkeypatch.setattr("app.services.career_roadmap_service.load_master_profile", mock_load_master)
+    monkeypatch.setattr(CareerRoadmapService, "_save_roadmap_doc", mock_save_doc)
+
+    jd_text = """
+    Platform Engineer Position.
+    Required Skills:
+    - Kubernetes cluster orchestration and Helm charts
+    - Apache Kafka high throughput event streaming
+    """
+
+    req = GenerateRoadmapRequest(
+        targetRole="Platform Engineer",
+        jobDescription=jd_text,
+    )
+
+    plan = await CareerRoadmapService.generate_roadmap(user, req)
+
+    # Should discover TransferableBridge from Docker to Kubernetes
+    bridge_milestones = [m for m in plan.milestones if m.category == "TransferableBridge"]
+    assert len(bridge_milestones) >= 1
+    assert any("kubernetes" in m.requirement_name.lower() for m in bridge_milestones)
+
+    # Should generate VerifiableProject or CoreFoundation for unbridgeable Apache Kafka
+    kafka_milestones = [m for m in plan.milestones if "kafka" in m.requirement_name.lower()]
+    assert len(kafka_milestones) >= 1
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_direct_matches_do_not_become_gaps(monkeypatch):
+    """Phase 3C: Technologies verified in Master Workspace do NOT become roadmap gap milestones."""
+    user = AuthenticatedUser(uid="usr_direct", token="tok_d", email="direct@example.com")
+
+    # Candidate already has Python and PostgreSQL verified in experience
+    master_evidence = CandidateEvidence(
+        experience=[
+            ExperienceItem(
+                id="exp_py",
+                role="Backend Developer",
+                company="Data Corp",
+                technologies=["Python", "PostgreSQL"],
+                bullets=["Built data APIs with Python and managed PostgreSQL databases."],
+            )
+        ],
+        skills=[
+            SkillItem(name="Python", category="Technical", verificationStatus="verified"),
+            SkillItem(name="PostgreSQL", category="Technical", verificationStatus="verified"),
+        ],
+    )
+
+    async def mock_load_master(u):
+        return master_evidence
+
+    async def mock_save_doc(u, rid, data):
+        return True
+
+    monkeypatch.setattr("app.services.career_roadmap_service.load_master_profile", mock_load_master)
+    monkeypatch.setattr(CareerRoadmapService, "_save_roadmap_doc", mock_save_doc)
+
+    jd_text = """
+    Software Engineer (Backend).
+    Requirements:
+    - Python programming
+    - PostgreSQL database design
+    - Rust systems programming
+    """
+
+    req = GenerateRoadmapRequest(
+        targetRole="Software Engineer",
+        jobDescription=jd_text,
+    )
+
+    plan = await CareerRoadmapService.generate_roadmap(user, req)
+
+    # Python and PostgreSQL are direct matches -> MUST NOT be in roadmap milestones
+    milestone_reqs = [m.requirement_name.lower() for m in plan.milestones]
+    assert "python" not in milestone_reqs
+    assert "postgresql" not in milestone_reqs
+
+    # Rust is missing -> MUST be in roadmap milestones
+    assert any("rust" in r for r in milestone_reqs)
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_canonical_jd_hash_parity(monkeypatch):
+    """Phase 3C: Equivalent canonical JD text with different whitespace/CRLF produces exact same JD hash and provenance."""
+    from app.core.security import hash_job_description
+
+    jd_lf = "Software Engineer\nPython development\nAWS deployment"
+    jd_crlf = "Software Engineer  \r\nPython development\r\nAWS deployment  "
+
+    hash_lf = hash_job_description(jd_lf)
+    hash_crlf = hash_job_description(jd_crlf)
+
+    assert hash_lf == hash_crlf
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_different_jds_produce_distinct_provenance(monkeypatch):
+    """Phase 3C: Different JDs produce distinct JD hashes and distinct roadmap plans."""
+    user = AuthenticatedUser(uid="usr_diff_jd", token="tok_dj", email="diff@example.com")
+
+    async def mock_load_master(u):
+        return CandidateEvidence()
+
+    async def mock_save_doc(u, rid, data):
+        return True
+
+    monkeypatch.setattr("app.services.career_roadmap_service.load_master_profile", mock_load_master)
+    monkeypatch.setattr(CareerRoadmapService, "_save_roadmap_doc", mock_save_doc)
+
+    req_a = GenerateRoadmapRequest(
+        targetRole="DevOps Engineer",
+        jobDescription="Kubernetes and Terraform required.",
+    )
+    req_b = GenerateRoadmapRequest(
+        targetRole="DevOps Engineer",
+        jobDescription="AWS and Python required.",
+    )
+
+    plan_a = await CareerRoadmapService.generate_roadmap(user, req_a)
+    plan_b = await CareerRoadmapService.generate_roadmap(user, req_b)
+
+    assert plan_a.job_description_hash != plan_b.job_description_hash
+    assert plan_a.provenance.provenance_hash != plan_b.provenance.provenance_hash
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_phase_3b_attestation_interaction(monkeypatch):
+    """
+    Phase 3C + Phase 3B Interaction:
+    A user_confirmed skill in workspace without narrative experience is recognized as
+    user_confirmation_required and appropriately included in roadmap gaps.
+    """
+    user = AuthenticatedUser(uid="usr_attested_interaction", token="tok_att", email="att@example.com")
+
+    # Workspace has Vue as user_confirmed attestation (Phase 3B result)
+    master_evidence = CandidateEvidence(
+        skills=[
+            SkillItem(
+                name="Vue",
+                category="Framework",
+                verificationStatus="user_confirmed",
+                provenance="user_attestation",
+                confidence=0.70,
+            )
+        ]
+    )
+
+    async def mock_load_master(u):
+        return master_evidence
+
+    async def mock_save_doc(u, rid, data):
+        return True
+
+    monkeypatch.setattr("app.services.career_roadmap_service.load_master_profile", mock_load_master)
+    monkeypatch.setattr(CareerRoadmapService, "_save_roadmap_doc", mock_save_doc)
+
+    jd_text = """
+    Frontend Lead.
+    Requirements:
+    - Vue frontend architecture and state management
+    """
+
+    req = GenerateRoadmapRequest(
+        targetRole="Frontend Lead",
+        jobDescription=jd_text,
+    )
+
+    plan = await CareerRoadmapService.generate_roadmap(user, req)
+
+    # Vue is user_confirmed without experience -> must be targeted by the roadmap
+    assert plan.total_milestones >= 1
+    assert any("vue" in m.requirement_name.lower() for m in plan.milestones)
+
+
+@pytest.mark.asyncio
+async def test_standalone_roadmap_tenant_isolation(monkeypatch):
+    """Phase 3C: Multi-tenant security ensures User B cannot access or mutate User A's standalone roadmap."""
+    from app.services.resume_service import _encode_firestore_fields
+
+    user_a = AuthenticatedUser(uid="usr_alice", token="tok_a", email="alice@example.com")
+    user_b = AuthenticatedUser(uid="usr_bob", token="tok_b", email="bob@example.com")
+
+    stored_roadmaps = {}
+
+    class MockClient:
+        async def get(self, url, headers=None, timeout=None):
+            for k, doc in stored_roadmaps.items():
+                if k in url:
+                    return MagicMock(status_code=200, json=lambda: doc)
+            return MagicMock(status_code=404, json=lambda: {"error": "Not found"})
+
+        async def patch(self, url, headers=None, json=None, timeout=None):
+            return MagicMock(status_code=200)
+
+        async def delete(self, url, headers=None, timeout=None):
+            return MagicMock(status_code=200)
+
+    monkeypatch.setattr("app.services.career_roadmap_service.get_http_client", lambda: MockClient())
+
+    # User A creates a roadmap
+    plan_a = RoadmapPlan(
+        roadmapId="rdm_alice_secret",
+        userId="usr_alice",
+        title="Alice's ML Roadmap",
+        targetRole="ML Engineer",
+        version=1,
+        totalMilestones=1,
+        milestones=[
+            RoadmapMilestone(
+                milestoneId="ms_a1",
+                orderIndex=0,
+                title="Deep Learning",
+                category="CoreFoundation",
+                requirementName="PyTorch",
+                targetCapability="Model Training",
+                rationale="Essential for ML",
+            )
+        ],
+        createdAt="2026-09-28T12:00:00Z",
+        updatedAt="2026-09-28T12:00:00Z",
+    )
+
+    stored_roadmaps["/users/usr_alice/roadmaps/rdm_alice_secret"] = {
+        "name": "projects/pid/databases/(default)/documents/users/usr_alice/roadmaps/rdm_alice_secret",
+        "fields": _encode_firestore_fields(plan_a.model_dump(by_alias=True)),
+    }
+
+    # User A can access own roadmap
+    fetched_a = await CareerRoadmapService.get_roadmap(user_a, "rdm_alice_secret")
+    assert fetched_a.roadmap_id == "rdm_alice_secret"
+    assert fetched_a.user_id == "usr_alice"
+
+    # User B attempting to access User A's roadmap gets 404 (isolated path)
+    with pytest.raises(HTTPException) as exc_info:
+        await CareerRoadmapService.get_roadmap(user_b, "rdm_alice_secret")
+    assert exc_info.value.status_code == 404

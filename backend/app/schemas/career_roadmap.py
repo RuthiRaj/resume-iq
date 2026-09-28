@@ -137,6 +137,7 @@ class RoadmapProvenance(BaseModel):
     """Cryptographic and contextual provenance tracking why and when the roadmap was generated."""
     source_variant_id: Optional[str] = Field(default=None, alias="sourceVariantId")
     source_analysis_score: Optional[int] = Field(default=None, alias="sourceAnalysisScore")
+    job_description_hash: Optional[str] = Field(default=None, alias="jobDescriptionHash")
     generated_at: str = Field(..., alias="generatedAt")
     generator_version: str = Field(default="5.1.0", alias="generatorVersion")
     provenance_hash: str = Field(..., alias="provenanceHash")
@@ -149,6 +150,7 @@ class RoadmapSnapshotRecord(BaseModel):
     snapshot_id: str = Field(..., alias="snapshotId")
     version: int
     workspace_evidence_hash: str = Field(..., alias="workspaceEvidenceHash")
+    job_description_hash: Optional[str] = Field(default=None, alias="jobDescriptionHash")
     target_role: str = Field(..., alias="targetRole")
     target_company: Optional[str] = Field(default="", alias="targetCompany")
     milestone_count: int = Field(..., alias="milestoneCount")
@@ -172,6 +174,7 @@ class RoadmapPlan(BaseModel):
     target_company: Optional[str] = Field(default="", alias="targetCompany")
     target_level: Optional[str] = Field(default="", alias="targetLevel")
     source_variant_id: Optional[str] = Field(default=None, alias="sourceVariantId")
+    job_description_hash: Optional[str] = Field(default=None, alias="jobDescriptionHash")
     version: int = Field(default=1, ge=1)
     lifecycle: RoadmapLifecycle = Field(default="ACTIVE")
     workspace_evidence_hash: Optional[str] = Field(default=None, alias="workspaceEvidenceHash")

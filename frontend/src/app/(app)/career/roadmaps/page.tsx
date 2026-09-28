@@ -80,6 +80,10 @@ export default function CareerRoadmapsPage() {
       setGenerateError("Please enter a target role.");
       return;
     }
+    if (!jobDescription.trim()) {
+      setGenerateError("Please enter a job description to generate a grounded career roadmap.");
+      return;
+    }
 
     setIsGenerating(true);
     setGenerateError(null);
@@ -91,7 +95,7 @@ export default function CareerRoadmapsPage() {
       const newRoadmap = await generateRoadmap(idToken, {
         targetRole: targetRole.trim(),
         targetCompany: targetCompany.trim() || undefined,
-        jobDescription: jobDescription.trim() || undefined,
+        jobDescription: jobDescription.trim(),
       });
 
       setIsGenerateOpen(false);
@@ -298,13 +302,16 @@ export default function CareerRoadmapsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-small font-medium text-primary">Job Description / Requirements (Optional)</label>
+            <label className="text-small font-medium text-primary">
+              Job Description / Requirements <span className="text-status-error">*</span>
+            </label>
             <Textarea
               rows={4}
               placeholder="Paste target job description to extract bespoke technical and experiential requirements..."
               value={jobDescription}
               onChange={(e) => setJobDescription(e.target.value)}
               disabled={isGenerating}
+              required
             />
           </div>
 
@@ -327,7 +334,7 @@ export default function CareerRoadmapsPage() {
             <Button
               type="submit"
               variant="primary"
-              disabled={isGenerating || !targetRole.trim()}
+              disabled={isGenerating || !targetRole.trim() || !jobDescription.trim()}
               className="gap-1.5"
             >
               {isGenerating ? (

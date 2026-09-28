@@ -188,6 +188,7 @@ export interface RoadmapMilestone {
 export interface RoadmapProvenance {
   sourceVariantId?: string;
   sourceAnalysisScore?: number;
+  jobDescriptionHash?: string;
   generatedAt: string;
   generatorVersion: string;
   provenanceHash: string;
@@ -197,6 +198,7 @@ export interface RoadmapSnapshotRecord {
   snapshotId: string;
   version: number;
   workspaceEvidenceHash: string;
+  jobDescriptionHash?: string;
   targetRole: string;
   targetCompany?: string;
   milestoneCount: number;
@@ -214,6 +216,7 @@ export interface RoadmapPlan {
   targetCompany?: string;
   targetLevel?: string;
   sourceVariantId?: string;
+  jobDescriptionHash?: string;
   version: number;
   lifecycle: RoadmapLifecycle;
   workspaceEvidenceHash?: string;

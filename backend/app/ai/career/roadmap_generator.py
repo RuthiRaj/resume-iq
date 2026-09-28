@@ -181,6 +181,7 @@ class RoadmapGenerator:
         remediation_strategies: Optional[List[GapRemediationStrategy]] = None,
         source_variant_id: Optional[str] = None,
         source_analysis_score: Optional[int] = None,
+        job_description_hash: Optional[str] = None,
     ) -> RoadmapPlan:
         """
         Synthesizes a structured, DAG-grounded RoadmapPlan.
@@ -350,6 +351,7 @@ class RoadmapGenerator:
             "target_company": (target_company or "").strip().lower(),
             "source_variant_id": source_variant_id or "",
             "source_analysis_score": source_analysis_score,
+            "job_description_hash": job_description_hash or "",
             "milestone_blueprints": [
                 {
                     "category": m.category,
@@ -373,6 +375,7 @@ class RoadmapGenerator:
         provenance = RoadmapProvenance(
             sourceVariantId=source_variant_id,
             sourceAnalysisScore=source_analysis_score,
+            jobDescriptionHash=job_description_hash,
             generatedAt=now_iso,
             generatorVersion="5.1.0",
             provenanceHash=prov_hash,
@@ -385,6 +388,7 @@ class RoadmapGenerator:
             snapshotId=f"snp_{uuid.uuid4().hex[:10]}",
             version=1,
             workspaceEvidenceHash=evidence_hash,
+            jobDescriptionHash=job_description_hash,
             targetRole=target_role,
             targetCompany=target_company or "",
             milestoneCount=len(milestones),
@@ -402,6 +406,7 @@ class RoadmapGenerator:
             targetCompany=target_company or "",
             targetLevel="",
             sourceVariantId=source_variant_id,
+            jobDescriptionHash=job_description_hash,
             version=1,
             lifecycle="ACTIVE",
             workspaceEvidenceHash=evidence_hash,
