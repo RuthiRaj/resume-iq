@@ -1,11 +1,17 @@
 import re
 import uuid
 import hashlib
+import asyncio
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple, Set
 from fastapi import HTTPException, status
 from app.core.auth import AuthenticatedUser
 from app.core.security import hash_job_description
+
+# TODO: _resync_locks is process-local. In multi-instance deployments, simultaneous
+# resync requests across instances must be coordinated via a distributed lock (e.g. Redis)
+# or Firestore transaction / version-conditional atomic write to prevent duplicate generation.
+_resync_locks: Dict[Tuple[str, str], asyncio.Lock] = {}
 from app.schemas.candidate import (
     CandidateEvidence,
     ExperienceItem,
@@ -21,14 +27,17 @@ from app.schemas.variant import (
     RequirementProgression,
     FitComparisonResponse,
     CreateTargetedVariantRequest,
+    GenerateResumeRequest,
     ApplyVariantChangeRequest,
     AiEditVariantRequest,
     AiEditProposalResponse,
     RevertChangeResponse,
     ExportTargetedResumeResponse,
+    SyncStatusResponse,
 )
 from app.schemas.requirement_match import RequirementMatch
 from app.services.resume_service import ResumeService
+from app.services.evidence_hash import compute_workspace_evidence_hash
 from app.ai.remediation_engine import generate_source_evidence_id
 from app.ai.provider import AiAnalyzerProvider
 from app.ai.fallback_provider import FallbackProvider
@@ -230,6 +239,12 @@ class VariantService:
             updated_at=now_iso,
         )
 
+        # Anchor workspace evidence hash for workspace-sourced variants so
+        # downstream sync checks can detect workspace drift.
+        if req.master_resume_id == "workspace":
+            variant.workspace_snapshot_hash = compute_workspace_evidence_hash(candidate_evidence)
+            variant.last_synced_at = now_iso
+
         # 5. Persist to Firestore under users/{uid}/resumes/{variant_id}
         doc_payload = variant.model_dump(by_alias=True)
         # Also include top-level compatibility fields expected by frontend
@@ -271,6 +286,206 @@ class VariantService:
         doc_copy = dict(doc)
         doc_copy["snapshot"] = _parse_candidate_evidence_from_snapshot(doc.get("snapshot"))
         return TargetedResumeVariant.model_validate(doc_copy)
+
+    @staticmethod
+    async def get_workspace_sync_status(
+        user: AuthenticatedUser,
+        variant_id: str,
+    ) -> SyncStatusResponse:
+        """
+        Read-only check comparing the variant's anchored workspace evidence hash
+        against a freshly computed hash of live workspace evidence.
+        Performs no writes.
+        """
+        _validate_safe_id(variant_id, "variant_id")
+        variant = await VariantService.get_targeted_variant(user, variant_id)
+
+        if variant.master_resume_id != "workspace":
+            return SyncStatusResponse(
+                variant_id=variant.variant_id,
+                in_sync=None,
+                workspace_hash=None,
+                variant_hash=variant.workspace_snapshot_hash,
+                last_synced_at=variant.last_synced_at,
+                message="Variant is not workspace-sourced; workspace sync is not applicable.",
+            )
+
+        live_evidence = await ResumeService.get_candidate_resume_data(user, "workspace")
+        live_hash = compute_workspace_evidence_hash(live_evidence)
+        in_sync = (
+            variant.workspace_snapshot_hash is not None
+            and variant.workspace_snapshot_hash == live_hash
+        )
+
+        return SyncStatusResponse(
+            variant_id=variant.variant_id,
+            in_sync=in_sync,
+            workspace_hash=live_hash,
+            variant_hash=variant.workspace_snapshot_hash,
+            last_synced_at=variant.last_synced_at,
+            message=(
+                "Variant is in sync with the workspace."
+                if in_sync
+                else "Workspace has changed since this variant was generated. Resync to update it."
+            ),
+        )
+
+    @staticmethod
+    async def resync_variant_with_workspace(
+        user: AuthenticatedUser,
+        variant_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Resyncs a workspace-sourced variant against live workspace evidence.
+        - In-flight lock guards against duplicate simultaneous generations.
+        - Legacy variants (missing workspace_snapshot_hash) are re-anchored silently without AI calls.
+        - No-op (returns inSync=True) when the live evidence hash matches the
+          variant's anchored hash.
+        - Version-check guards against overwriting intervening user modifications (raises 409 Conflict).
+        - Otherwise regenerates the tailored resume from current workspace
+          evidence in memory (persist=False), merges it into the EXISTING variant
+          (identity preserved, version+1, ledger appended with a WorkspaceSync record), and persists.
+        """
+        _validate_safe_id(variant_id, "variant_id")
+
+        lock = _resync_locks.setdefault((user.uid, variant_id), asyncio.Lock())
+        async with lock:
+            variant = await VariantService.get_targeted_variant(user, variant_id)
+
+            if variant.master_resume_id != "workspace":
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=(
+                        f"Variant '{variant_id}' is not workspace-sourced "
+                        f"(masterResumeId='{variant.master_resume_id}'); "
+                        "only workspace-sourced variants can be resynced."
+                    ),
+                )
+
+            live_evidence = await ResumeService.get_candidate_resume_data(user, "workspace")
+            live_hash = compute_workspace_evidence_hash(live_evidence)
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            # Legacy variants without anchored hash: re-anchor silently without AI call
+            if variant.workspace_snapshot_hash is None:
+                variant.workspace_snapshot_hash = live_hash
+                variant.last_synced_at = now_iso
+                doc_payload = variant.model_dump(by_alias=True)
+                doc_payload["score"] = variant.current_score or 0
+                doc_payload["atsScore"] = variant.current_score or 0
+                doc_payload["template"] = "ats"
+                doc_payload["lastEdited"] = now_iso
+                doc_payload["jobDescription"] = variant.job_description or ""
+                saved = await ResumeService.save_resume_snapshot(user, variant_id, doc_payload)
+                if not saved:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Failed to persist legacy variant re-anchoring to database.",
+                    )
+                return {
+                    "inSync": True,
+                    "variantId": variant.variant_id,
+                    "workspaceSnapshotHash": live_hash,
+                    "message": "Legacy variant anchored with current workspace evidence hash.",
+                    "variant": variant.model_dump(by_alias=True),
+                }
+
+            if variant.workspace_snapshot_hash == live_hash:
+                return {
+                    "inSync": True,
+                    "variantId": variant.variant_id,
+                    "workspaceSnapshotHash": variant.workspace_snapshot_hash,
+                    "message": "Variant is already in sync with the workspace.",
+                    "variant": variant.model_dump(by_alias=True),
+                }
+
+            # Lazy import to avoid a circular import (resume_generation_service imports VariantService).
+            from app.services.resume_generation_service import ResumeGenerationService
+
+            initial_version = variant.version
+            regenerated = await ResumeGenerationService.generate_role_targeted_resume(
+                user,
+                GenerateResumeRequest(
+                    target_role=variant.target_role,
+                    target_company=variant.target_company or "",
+                    job_description=variant.job_description or "",
+                ),
+                persist=False,
+            )
+
+            target_hash = regenerated.workspace_snapshot_hash or live_hash
+
+            # Atomic / concurrency safety check: reload the variant to ensure no intervening mutations
+            current_variant = await VariantService.get_targeted_variant(user, variant_id)
+            if current_variant.version != initial_version:
+                if current_variant.workspace_snapshot_hash == target_hash:
+                    # Concurrent request already completed the resync with identical evidence
+                    return {
+                        "inSync": True,
+                        "variantId": current_variant.variant_id,
+                        "workspaceSnapshotHash": current_variant.workspace_snapshot_hash,
+                        "message": f"Variant was already resynced by a concurrent request (v{current_variant.version}).",
+                        "variant": current_variant.model_dump(by_alias=True),
+                    }
+                # An intervening user edit (e.g. manual edit / AI edit) occurred during resync
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"Concurrency conflict: variant was modified (version changed from {initial_version} "
+                        f"to {current_variant.version}) during synchronization. Intervening changes preserved."
+                    ),
+                )
+
+            # Merge regenerated content into the EXISTING variant (identity preserved).
+            new_version = variant.version + 1
+            variant.version = new_version
+            variant.snapshot = regenerated.snapshot
+            variant.current_score = regenerated.current_score
+            variant.current_breakdown = regenerated.current_breakdown
+            variant.current_matches = regenerated.current_matches
+            variant.score_delta = regenerated.score_delta
+            variant.provider = regenerated.provider
+            variant.model = regenerated.model
+            variant.generation_metadata = regenerated.generation_metadata
+            variant.workspace_snapshot_hash = target_hash
+            variant.last_synced_at = now_iso
+            variant.updated_at = now_iso
+
+            change_record = ChangeRecord(
+                id=f"chg_{uuid.uuid4().hex[:10]}",
+                action_type="WorkspaceSync",
+                requirement_name="Workspace synchronization",
+                section="Experience",
+                target_item_id="workspace",
+                approved_text=f"Regenerated from updated workspace evidence (v{new_version})",
+                status="Applied",
+                version_introduced=new_version,
+                applied_at=now_iso,
+            )
+            variant.change_ledger.append(change_record)
+
+            doc_payload = variant.model_dump(by_alias=True)
+            doc_payload["score"] = variant.current_score or 0
+            doc_payload["atsScore"] = variant.current_score or 0
+            doc_payload["template"] = "ats"
+            doc_payload["lastEdited"] = now_iso
+            doc_payload["jobDescription"] = variant.job_description or ""
+
+            saved = await ResumeService.save_resume_snapshot(user, variant_id, doc_payload)
+            if not saved:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to persist resynced variant to database.",
+                )
+
+            return {
+                "inSync": False,
+                "variantId": variant.variant_id,
+                "newVersion": new_version,
+                "workspaceSnapshotHash": variant.workspace_snapshot_hash,
+                "message": f"Variant resynced with updated workspace evidence (v{new_version}).",
+                "variant": variant.model_dump(by_alias=True),
+            }
 
     @staticmethod
     async def propose_ai_edit(

@@ -88,7 +88,7 @@ export function resolveResumeData(
   };
 }
 
-export function ResumeModernTemplate({ data }: { data: ResumeData }) {
+export const ResumeModernTemplate = React.memo(function ResumeModernTemplate({ data }: { data: ResumeData }) {
   const { profile, education, skills, projects, experience, certifications, customSummary } = data;
 
   return (
@@ -229,9 +229,10 @@ export function ResumeModernTemplate({ data }: { data: ResumeData }) {
       )}
     </div>
   );
-}
+});
 
-export function ResumeMinimalTemplate({ data }: { data: ResumeData }) {
+
+export const ResumeMinimalTemplate = React.memo(function ResumeMinimalTemplate({ data }: { data: ResumeData }) {
   const { profile, education, skills, projects, experience, certifications, customSummary } = data;
 
   return (
@@ -344,9 +345,10 @@ export function ResumeMinimalTemplate({ data }: { data: ResumeData }) {
       )}
     </div>
   );
-}
+});
 
-export function ResumeAtsTemplate({ data }: { data: ResumeData }) {
+
+export const ResumeAtsTemplate = React.memo(function ResumeAtsTemplate({ data }: { data: ResumeData }) {
   const { profile, education, skills, projects, experience, certifications, customSummary } = data;
 
   return (
@@ -444,9 +446,9 @@ export function ResumeAtsTemplate({ data }: { data: ResumeData }) {
       )}
     </div>
   );
-}
+});
 
-export function ResumeUniversalRenderer({
+export const ResumeUniversalRenderer = React.memo(function ResumeUniversalRenderer({
   template,
   data,
   resume,
@@ -477,4 +479,5 @@ export function ResumeUniversalRenderer({
     default:
       return <ResumeModernTemplate data={resolvedData} />;
   }
-}
+});
+

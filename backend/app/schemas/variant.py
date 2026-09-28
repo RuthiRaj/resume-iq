@@ -22,6 +22,7 @@ ChangeActionType = Literal[
     "Generated",
     "UserAttested",
     "ManualEdit",
+    "WorkspaceSync",
 ]
 ChangeStatus = Literal["Draft", "Approved", "Applied", "Reverted"]
 
@@ -80,6 +81,16 @@ class TargetedResumeVariant(BaseModel):
     provider: Optional[str] = Field(default=None)
     model: Optional[str] = Field(default=None)
     generation_metadata: Optional[Dict[str, Any]] = Field(default=None, alias="generationMetadata")
+
+    # Workspace sync anchoring (workspace-sourced variants only)
+    workspace_snapshot_hash: Optional[str] = Field(
+        default=None, alias="workspaceSnapshotHash",
+        description="SHA-256 hash of the live workspace CandidateEvidence at generation/sync time.",
+    )
+    last_synced_at: Optional[str] = Field(
+        default=None, alias="lastSyncedAt",
+        description="UTC ISO timestamp of the last workspace sync.",
+    )
 
     created_at: str = Field(..., alias="createdAt")
     updated_at: str = Field(..., alias="updatedAt")
@@ -222,6 +233,23 @@ class ExportTargetedResumeResponse(BaseModel):
     format: str
     content: str
     exported_at: str = Field(..., alias="exportedAt")
+
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+
+# --- 5. Workspace Sync Contracts ---
+
+class SyncStatusResponse(BaseModel):
+    variant_id: str = Field(..., alias="variantId")
+    in_sync: Optional[bool] = Field(
+        default=None, alias="inSync",
+        description="True if live workspace evidence hash matches the variant's anchored hash. "
+                    "None when the variant is not workspace-sourced (sync not applicable).",
+    )
+    workspace_hash: Optional[str] = Field(default=None, alias="workspaceHash")
+    variant_hash: Optional[str] = Field(default=None, alias="variantHash")
+    last_synced_at: Optional[str] = Field(default=None, alias="lastSyncedAt")
+    message: Optional[str] = Field(default=None)
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 

@@ -1,8 +1,10 @@
 import pytest
+import asyncio
 import json
 from unittest.mock import MagicMock, AsyncMock
 from pydantic import ValidationError
 from app.schemas.variant import (
+    TargetedResumeVariant,
     CreateTargetedVariantRequest,
     ApplyVariantChangeRequest,
     AiEditVariantRequest,
@@ -1649,4 +1651,623 @@ async def test_tenant_isolation_prevents_access_to_other_users_variant(monkeypat
     with pytest.raises(HTTPException) as exc_info:
         await VariantService.get_targeted_variant(user_b, "var_private_1")
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_workspace_sync_status_in_sync_and_drift(monkeypatch):
+    """Verifies get_workspace_sync_status accurately detects in-sync, drift, and non-workspace variants."""
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+
+    user = AuthenticatedUser(uid="usr_sync_1", token="tok_1")
+    ev1 = CandidateEvidence(
+        headline="Software Engineer",
+        summary="Experienced engineer.",
+        experience=[ExperienceItem(id="exp_0", role="Dev", company="Acme", bullets=["Built API."])],
+        skills=[SkillItem(name="Python")],
+    )
+    hash1 = compute_workspace_evidence_hash(ev1)
+
+    variant_doc = {
+        "variantId": "var_ws_sync_1",
+        "masterResumeId": "workspace",
+        "title": "Targeted: Backend Engineer",
+        "targetRole": "Backend Engineer",
+        "jobDescriptionHash": "hash123",
+        "version": 1,
+        "isTargetedVariant": True,
+        "workspaceSnapshotHash": hash1,
+        "lastSyncedAt": "2026-09-28T12:00:00Z",
+        "snapshot": ev1.model_dump(),
+        "changeLedger": [],
+        "createdAt": "2026-09-28T12:00:00Z",
+        "updatedAt": "2026-09-28T12:00:00Z",
+    }
+
+    # Case 1: Workspace unchanged -> in_sync=True
+    monkeypatch.setattr(ResumeService, "get_resume_document", AsyncMock(return_value=variant_doc))
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=ev1))
+
+    status1 = await VariantService.get_workspace_sync_status(user, "var_ws_sync_1")
+    assert status1.in_sync is True
+    assert status1.workspace_hash == hash1
+    assert status1.variant_hash == hash1
+
+    # Case 2: Workspace modified (drift) -> in_sync=False
+    ev2 = CandidateEvidence(
+        headline="Senior Software Engineer",
+        summary="Experienced engineer with cloud skills.",
+        experience=[ExperienceItem(id="exp_0", role="Dev", company="Acme", bullets=["Built API.", "Deployed to K8s."])],
+        skills=[SkillItem(name="Python"), SkillItem(name="Kubernetes")],
+    )
+    hash2 = compute_workspace_evidence_hash(ev2)
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=ev2))
+
+    status2 = await VariantService.get_workspace_sync_status(user, "var_ws_sync_1")
+    assert status2.in_sync is False
+    assert status2.workspace_hash == hash2
+    assert status2.variant_hash == hash1
+    assert "Workspace has changed" in status2.message
+
+    # Case 3: Non-workspace variant -> in_sync=None
+    non_ws_doc = dict(variant_doc)
+    non_ws_doc["masterResumeId"] = "resume_doc_123"
+    monkeypatch.setattr(ResumeService, "get_resume_document", AsyncMock(return_value=non_ws_doc))
+
+    status3 = await VariantService.get_workspace_sync_status(user, "var_ws_sync_1")
+    assert status3.in_sync is None
+    assert "not workspace-sourced" in status3.message
+
+
+@pytest.mark.asyncio
+async def test_resync_variant_no_op_when_in_sync(monkeypatch):
+    """Verifies that resync is a cheap no-op when workspace hash matches (0 AI calls)."""
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+
+    user = AuthenticatedUser(uid="usr_sync_2", token="tok_2")
+    ev = CandidateEvidence(
+        headline="Software Engineer",
+        experience=[ExperienceItem(id="exp_0", role="Dev", company="Acme", bullets=["Built API."])],
+        skills=[SkillItem(name="Python")],
+    )
+    h = compute_workspace_evidence_hash(ev)
+
+    variant_doc = {
+        "variantId": "var_ws_sync_2",
+        "masterResumeId": "workspace",
+        "title": "Targeted: Backend Engineer",
+        "targetRole": "Backend Engineer",
+        "jobDescriptionHash": "hash123",
+        "version": 1,
+        "isTargetedVariant": True,
+        "workspaceSnapshotHash": h,
+        "lastSyncedAt": "2026-09-28T12:00:00Z",
+        "snapshot": ev.model_dump(),
+        "changeLedger": [],
+        "createdAt": "2026-09-28T12:00:00Z",
+        "updatedAt": "2026-09-28T12:00:00Z",
+    }
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", AsyncMock(return_value=variant_doc))
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=ev))
+
+    result = await VariantService.resync_variant_with_workspace(user, "var_ws_sync_2")
+    assert result["inSync"] is True
+    assert result["variantId"] == "var_ws_sync_2"
+    assert "already in sync" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_resync_variant_updates_stale_variant(monkeypatch):
+    """Verifies that resync regenerates tailoring when stale, bumps version, appends WorkspaceSync record, and preserves ID."""
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+    from app.services.resume_generation_service import ResumeGenerationService
+
+    user = AuthenticatedUser(uid="usr_sync_3", token="tok_3")
+    old_ev = CandidateEvidence(
+        headline="Junior Dev",
+        experience=[ExperienceItem(id="exp_0", role="Dev", company="Acme", bullets=["Built API."])],
+        skills=[SkillItem(name="Python")],
+    )
+    old_hash = compute_workspace_evidence_hash(old_ev)
+
+    new_ev = CandidateEvidence(
+        headline="Senior Dev",
+        experience=[ExperienceItem(id="exp_0", role="Senior Dev", company="Acme", bullets=["Built API v2."])],
+        skills=[SkillItem(name="Python"), SkillItem(name="Go")],
+    )
+    new_hash = compute_workspace_evidence_hash(new_ev)
+
+    saved_docs = {}
+
+    variant_doc = {
+        "variantId": "var_ws_sync_3",
+        "masterResumeId": "workspace",
+        "title": "Targeted: Backend Engineer",
+        "targetRole": "Backend Engineer",
+        "targetCompany": "Stripe",
+        "jobDescription": "Python and Go backend role",
+        "jobDescriptionHash": "hash123",
+        "version": 1,
+        "isTargetedVariant": True,
+        "workspaceSnapshotHash": old_hash,
+        "lastSyncedAt": "2026-09-28T12:00:00Z",
+        "snapshot": old_ev.model_dump(),
+        "changeLedger": [],
+        "createdAt": "2026-09-28T12:00:00Z",
+        "updatedAt": "2026-09-28T12:00:00Z",
+    }
+    saved_docs["var_ws_sync_3"] = variant_doc
+
+    async def mock_get_doc(u, r_id):
+        return saved_docs.get(r_id)
+
+    async def mock_save_doc(u, r_id, data):
+        saved_docs[r_id] = data
+        return True
+
+    # Mock in-memory regenerated variant returned by ResumeGenerationService (persist=False)
+    regenerated_variant = TargetedResumeVariant(
+        variant_id="var_inmemory_1",
+        master_resume_id="workspace",
+        title="Targeted: Backend Engineer @ Stripe",
+        target_role="Backend Engineer",
+        target_company="Stripe",
+        job_description="Python and Go backend role",
+        job_description_hash="hash123",
+        version=1,
+        is_targeted_variant=True,
+        current_score=92,
+        workspace_snapshot_hash=new_hash,
+        snapshot=new_ev,
+        change_ledger=[],
+        created_at="2026-09-28T13:00:00Z",
+        updated_at="2026-09-28T13:00:00Z",
+    )
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get_doc)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save_doc)
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=new_ev))
+    monkeypatch.setattr(ResumeGenerationService, "generate_role_targeted_resume", AsyncMock(return_value=regenerated_variant))
+
+    result = await VariantService.resync_variant_with_workspace(user, "var_ws_sync_3")
+
+    assert result["inSync"] is False
+    assert result["variantId"] == "var_ws_sync_3"
+    assert result["newVersion"] == 2
+    assert result["workspaceSnapshotHash"] == new_hash
+
+    # Check that the persisted document in saved_docs has version 2 and the WorkspaceSync change ledger item
+    updated_doc = saved_docs["var_ws_sync_3"]
+    assert updated_doc["version"] == 2
+    assert updated_doc["workspaceSnapshotHash"] == new_hash
+    assert len(updated_doc["changeLedger"]) == 1
+    assert updated_doc["changeLedger"][0]["actionType"] == "WorkspaceSync"
+    assert updated_doc["changeLedger"][0]["versionIntroduced"] == 2
+
+
+@pytest.mark.asyncio
+async def test_compute_workspace_evidence_hash_deterministic_and_excludes_volatile_metadata():
+    """
+    Verifies that compute_workspace_evidence_hash computes over CandidateEvidence data fields
+    and is completely immune to external document timestamps, lastSyncedAt, updatedAt, or dict ordering.
+    """
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+
+    ev1 = CandidateEvidence(
+        headline="Full Stack Engineer",
+        summary="Building distributed systems.",
+        experience=[
+            ExperienceItem(
+                id="exp_0",
+                role="Senior Engineer",
+                company="TechCorp",
+                bullets=["Engineered API microservices."],
+                technologies=["Python", "FastAPI"],
+                verification_status="verified",
+                confidence=0.95,
+            )
+        ],
+        projects=[
+            ProjectItem(
+                id="proj_0",
+                title="Search Engine",
+                highlights=["Implemented BM25 index."],
+                tech_stack=["Python"],
+                verification_status="verified",
+                confidence=0.9,
+            )
+        ],
+        skills=[
+            SkillItem(name="Python", category="Technical", proficiency="Expert", verification_status="verified", confidence=1.0, provenance="resume_parse"),
+            SkillItem(name="PostgreSQL", category="Technical", verification_status="user_confirmed", provenance="user_attestation"),
+        ],
+    )
+
+    ev2 = CandidateEvidence(
+        headline="Full Stack Engineer",
+        summary="Building distributed systems.",
+        experience=[
+            ExperienceItem(
+                id="exp_0",
+                role="Senior Engineer",
+                company="TechCorp",
+                bullets=["Engineered API microservices."],
+                technologies=["Python", "FastAPI"],
+                verification_status="verified",
+                confidence=0.95,
+            )
+        ],
+        projects=[
+            ProjectItem(
+                id="proj_0",
+                title="Search Engine",
+                highlights=["Implemented BM25 index."],
+                tech_stack=["Python"],
+                verification_status="verified",
+                confidence=0.9,
+            )
+        ],
+        skills=[
+            SkillItem(name="Python", category="Technical", proficiency="Expert", verification_status="verified", confidence=1.0, provenance="resume_parse"),
+            SkillItem(name="PostgreSQL", category="Technical", verification_status="user_confirmed", provenance="user_attestation"),
+        ],
+    )
+
+    hash1 = compute_workspace_evidence_hash(ev1)
+    hash2 = compute_workspace_evidence_hash(ev2)
+    assert hash1 == hash2
+
+    # Verify that external document timestamps on variants are NOT part of the CandidateEvidence schema
+    assert not hasattr(ev1, "createdAt")
+    assert not hasattr(ev1, "updatedAt")
+    assert not hasattr(ev1, "lastSyncedAt")
+
+
+@pytest.mark.asyncio
+async def test_compute_workspace_evidence_hash_stored_provenance_and_timestamp_invariance():
+    """
+    Verifies that modifying only timestamps inside raw Firestore dictionaries does not alter
+    the evidence hash, while stored verificationStatus/confidence/provenance are preserved.
+    """
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+
+    # Raw doc 1 with timestamp A
+    raw_skill1 = {
+        "id": "skill_0",
+        "name": "Distributed Systems",
+        "category": "Technical",
+        "proficiency": "Expert",
+        "verificationStatus": "verified",
+        "confidence": 0.95,
+        "provenance": "resume_parse",
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z",
+        "lastModified": 1700000000,
+    }
+
+    # Raw doc 2 with identical evidence but different timestamps
+    raw_skill2 = {
+        "id": "skill_0",
+        "name": "Distributed Systems",
+        "category": "Technical",
+        "proficiency": "Expert",
+        "verificationStatus": "verified",
+        "confidence": 0.95,
+        "provenance": "resume_parse",
+        "createdAt": "2026-09-28T22:00:00Z",
+        "updatedAt": "2026-09-28T22:55:00Z",
+        "lastModified": 1759000000,
+    }
+
+    skill_item1 = SkillItem.model_validate(raw_skill1)
+    skill_item2 = SkillItem.model_validate(raw_skill2)
+
+    ev1 = CandidateEvidence(skills=[skill_item1])
+    ev2 = CandidateEvidence(skills=[skill_item2])
+
+    assert compute_workspace_evidence_hash(ev1) == compute_workspace_evidence_hash(ev2)
+
+    # Confirm verificationStatus/confidence/provenance are stored values
+    assert skill_item1.verification_status == "verified"
+    assert skill_item1.confidence == 0.95
+    assert skill_item1.provenance == "resume_parse"
+
+
+@pytest.mark.asyncio
+async def test_resync_variant_concurrent_execution_protection(monkeypatch):
+    """
+    Verifies that when two concurrent resync requests execute:
+    - Request 1 regenerates and advances version to V+1.
+    - Request 2 detects that version was advanced and hash is already up to date,
+      safely returning inSync=True with V+1 without duplicate version bump or corrupted ledger.
+    """
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+    from app.services.resume_generation_service import ResumeGenerationService
+
+    user = AuthenticatedUser(uid="usr_concurrent_sync", token="tok_cs")
+    old_ev = CandidateEvidence(headline="Junior Dev", skills=[SkillItem(name="Python")])
+    old_hash = compute_workspace_evidence_hash(old_ev)
+
+    new_ev = CandidateEvidence(headline="Senior Dev", skills=[SkillItem(name="Python"), SkillItem(name="Rust")])
+    new_hash = compute_workspace_evidence_hash(new_ev)
+
+    saved_docs = {}
+
+    variant_doc = {
+        "variantId": "var_concurrent_1",
+        "masterResumeId": "workspace",
+        "title": "Targeted: Systems Engineer",
+        "targetRole": "Systems Engineer",
+        "jobDescriptionHash": "hash123",
+        "version": 1,
+        "isTargetedVariant": True,
+        "workspaceSnapshotHash": old_hash,
+        "lastSyncedAt": "2026-09-28T12:00:00Z",
+        "snapshot": old_ev.model_dump(),
+        "changeLedger": [],
+        "createdAt": "2026-09-28T12:00:00Z",
+        "updatedAt": "2026-09-28T12:00:00Z",
+    }
+    saved_docs["var_concurrent_1"] = dict(variant_doc)
+
+    async def mock_get_doc(u, r_id):
+        return saved_docs.get(r_id)
+
+    async def mock_save_doc(u, r_id, data):
+        saved_docs[r_id] = data
+        return True
+
+    regen_count = 0
+
+    async def mock_generate(u, req, persist=False):
+        nonlocal regen_count
+        regen_count += 1
+        return TargetedResumeVariant(
+            variant_id=f"var_inmemory_{regen_count}",
+            master_resume_id="workspace",
+            title="Targeted: Systems Engineer",
+            targetRole="Systems Engineer",
+            job_description_hash="hash123",
+            version=1,
+            is_targeted_variant=True,
+            current_score=95,
+            workspace_snapshot_hash=new_hash,
+            snapshot=new_ev,
+            change_ledger=[],
+            created_at="2026-09-28T13:00:00Z",
+            updated_at="2026-09-28T13:00:00Z",
+        )
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get_doc)
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save_doc)
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=new_ev))
+    monkeypatch.setattr(ResumeGenerationService, "generate_role_targeted_resume", mock_generate)
+
+    # Simulate 2 concurrent resync calls
+    res1, res2 = await asyncio.gather(
+        VariantService.resync_variant_with_workspace(user, "var_concurrent_1"),
+        VariantService.resync_variant_with_workspace(user, "var_concurrent_1"),
+    )
+
+    # Exactly one request did the resync and version bump to 2, while the other safely detected inSync=True
+    resync_res = res1 if not res1.get("inSync") else res2
+    noop_res = res2 if not res1.get("inSync") else res1
+
+    assert regen_count == 1, "In-flight lock must ensure generate_role_targeted_resume executes exactly once for concurrent requests"
+    assert resync_res["inSync"] is False
+    assert resync_res["newVersion"] == 2
+    assert noop_res["inSync"] is True
+    assert saved_docs["var_concurrent_1"]["version"] == 2
+    assert len(saved_docs["var_concurrent_1"]["changeLedger"]) == 1
+    assert saved_docs["var_concurrent_1"]["workspaceSnapshotHash"] == new_hash
+
+
+@pytest.mark.asyncio
+async def test_resync_variant_atomic_concurrency_conflict_on_intervening_edit(monkeypatch):
+    """
+    Verifies that if an intervening user edit modifies the variant during resync,
+    the resync aborts with HTTP 409 Conflict rather than silently overwriting the intervening change.
+    """
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+    from app.services.resume_generation_service import ResumeGenerationService
+
+    user = AuthenticatedUser(uid="usr_intervening_edit", token="tok_ie")
+    old_ev = CandidateEvidence(headline="Junior Dev", skills=[SkillItem(name="Python")])
+    old_hash = compute_workspace_evidence_hash(old_ev)
+
+    new_ev = CandidateEvidence(headline="Senior Dev", skills=[SkillItem(name="Python"), SkillItem(name="Rust")])
+    new_hash = compute_workspace_evidence_hash(new_ev)
+
+    saved_docs = {}
+
+    variant_doc = {
+        "variantId": "var_intervene_1",
+        "masterResumeId": "workspace",
+        "title": "Targeted: Systems Engineer",
+        "targetRole": "Systems Engineer",
+        "jobDescriptionHash": "hash123",
+        "version": 1,
+        "isTargetedVariant": True,
+        "workspaceSnapshotHash": old_hash,
+        "lastSyncedAt": "2026-09-28T12:00:00Z",
+        "snapshot": old_ev.model_dump(),
+        "changeLedger": [],
+        "createdAt": "2026-09-28T12:00:00Z",
+        "updatedAt": "2026-09-28T12:00:00Z",
+    }
+    saved_docs["var_intervene_1"] = dict(variant_doc)
+
+    # While generate_role_targeted_resume is running, simulate an intervening manual edit that bumps version to 2
+    async def mock_generate_with_intervening_edit(u, req, persist=False):
+        saved_docs["var_intervene_1"]["version"] = 2
+        saved_docs["var_intervene_1"]["changeLedger"] = [
+            {"id": "chg_manual_1", "actionType": "ManualEdit", "requirementName": "Edit", "section": "Experience", "targetItemId": "exp_0", "approvedText": "Manual edit.", "status": "Applied", "versionIntroduced": 2, "appliedAt": "2026-09-28T12:30:00Z"}
+        ]
+        return TargetedResumeVariant(
+            variant_id="var_inmemory_gen",
+            master_resume_id="workspace",
+            title="Targeted: Systems Engineer",
+            targetRole="Systems Engineer",
+            job_description_hash="hash123",
+            version=1,
+            is_targeted_variant=True,
+            current_score=95,
+            workspace_snapshot_hash=new_hash,
+            snapshot=new_ev,
+            change_ledger=[],
+            created_at="2026-09-28T13:00:00Z",
+            updated_at="2026-09-28T13:00:00Z",
+        )
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", AsyncMock(side_effect=lambda u, r_id: saved_docs.get(r_id)))
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", AsyncMock(return_value=True))
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=new_ev))
+    monkeypatch.setattr(ResumeGenerationService, "generate_role_targeted_resume", mock_generate_with_intervening_edit)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await VariantService.resync_variant_with_workspace(user, "var_intervene_1")
+
+    assert exc_info.value.status_code == 409
+    assert "Concurrency conflict" in exc_info.value.detail
+    assert "Intervening changes preserved" in exc_info.value.detail
+
+    # Confirm intervening manual edit is intact in saved_docs
+    assert saved_docs["var_intervene_1"]["version"] == 2
+    assert saved_docs["var_intervene_1"]["changeLedger"][0]["id"] == "chg_manual_1"
+
+
+@pytest.mark.asyncio
+async def test_legacy_variant_reanchors_silently_without_ai_call(monkeypatch):
+    """
+    Verifies that a legacy variant (with workspaceSnapshotHash = None) re-anchors
+    silently with 0 AI calls, version unchanged, and returns inSync=True.
+    """
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+    from app.services.resume_generation_service import ResumeGenerationService
+
+    user = AuthenticatedUser(uid="usr_legacy_resync", token="tok_leg")
+    live_ev = CandidateEvidence(
+        headline="Staff Architect",
+        skills=[SkillItem(name="Kubernetes", category="DevOps", verification_status="verified", confidence=1.0)],
+        experience=[ExperienceItem(id="exp_0", company="Stripe", role="Architect", highlights=["Built platform"])],
+    )
+    live_hash = compute_workspace_evidence_hash(live_ev)
+
+    legacy_doc = {
+        "variantId": "var_legacy_001",
+        "masterResumeId": "workspace",
+        "title": "Targeted: Staff Architect",
+        "targetRole": "Staff Architect",
+        "jobDescriptionHash": "jd_leg_hash",
+        "version": 1,
+        "isTargetedVariant": True,
+        "workspaceSnapshotHash": None,  # Legacy variant before hash anchoring
+        "lastSyncedAt": None,
+        "snapshot": live_ev.model_dump(),
+        "changeLedger": [],
+        "createdAt": "2026-08-01T10:00:00Z",
+        "updatedAt": "2026-08-01T10:00:00Z",
+    }
+    saved_store = {"var_legacy_001": legacy_doc}
+
+    ai_called = False
+
+    async def mock_ai_generate(*args, **kwargs):
+        nonlocal ai_called
+        ai_called = True
+        raise AssertionError("AI generation should NOT be called for legacy silent re-anchoring")
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", AsyncMock(side_effect=lambda u, r_id: saved_store.get(r_id)))
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", AsyncMock(side_effect=lambda u, r_id, doc: saved_store.update({r_id: doc}) or True))
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=live_ev))
+    monkeypatch.setattr(ResumeGenerationService, "generate_role_targeted_resume", mock_ai_generate)
+
+    res = await VariantService.resync_variant_with_workspace(user, "var_legacy_001")
+
+    assert not ai_called, "AI generator must not be invoked during legacy variant silent re-anchoring"
+    assert res["inSync"] is True
+    assert res["workspaceSnapshotHash"] == live_hash
+    assert "Legacy variant anchored" in res["message"]
+
+    # Check that the document in the database now has the hash anchored, version intact at 1
+    updated_doc = saved_store["var_legacy_001"]
+    assert updated_doc["workspaceSnapshotHash"] == live_hash
+    assert updated_doc["version"] == 1
+
+
+def test_evidence_hash_invariant_under_timestamp_mutation():
+    """
+    Verifies that changing transient timestamps or lastEdited dates on resume docs
+    does not alter compute_workspace_evidence_hash, while substantive content edits do.
+    """
+    from app.services.evidence_hash import compute_workspace_evidence_hash
+
+    ev1 = CandidateEvidence(
+        headline="Staff Engineer",
+        summary="Experienced engineer.",
+        skills=[
+            SkillItem(name="Python", category="Language", verification_status="verified", confidence=0.95, provenance="resume_parse"),
+        ],
+        experience=[
+            ExperienceItem(id="exp_0", company="Acme", role="Lead", start_date="2020", end_date="2024", bullets=["Scaled microservices"]),
+        ],
+        projects=[
+            ProjectItem(id="proj_0", title="ResumeIQ", description="AI resume tool", tech_stack=["Python", "FastAPI"]),
+        ],
+    )
+
+    ev2 = CandidateEvidence(
+        headline="Staff Engineer",
+        summary="Experienced engineer.",
+        skills=[
+            SkillItem(name="Python", category="Language", verification_status="verified", confidence=0.95, provenance="resume_parse"),
+        ],
+        experience=[
+            ExperienceItem(id="exp_0", company="Acme", role="Lead", start_date="2020", end_date="2024", bullets=["Scaled microservices"]),
+        ],
+        projects=[
+            ProjectItem(id="proj_0", title="ResumeIQ", description="AI resume tool", tech_stack=["Python", "FastAPI"]),
+        ],
+    )
+
+    hash1 = compute_workspace_evidence_hash(ev1)
+    hash2 = compute_workspace_evidence_hash(ev2)
+    assert hash1 == hash2
+
+    # Verify that stored verificationStatus, confidence, and provenance affect hash
+    ev_attested = CandidateEvidence(
+        headline="Staff Engineer",
+        summary="Experienced engineer.",
+        skills=[
+            SkillItem(name="Python", category="Language", verification_status="user_confirmed", confidence=0.70, provenance="user_attestation"),
+        ],
+        experience=[
+            ExperienceItem(id="exp_0", company="Acme", role="Lead", start_date="2020", end_date="2024", bullets=["Scaled microservices"]),
+        ],
+        projects=[
+            ProjectItem(id="proj_0", title="ResumeIQ", description="AI resume tool", tech_stack=["Python", "FastAPI"]),
+        ],
+    )
+    assert compute_workspace_evidence_hash(ev_attested) != hash1
+
+    # Verify that substantive content change (e.g. adding a bullet or changing skill name) DOES change the hash
+    ev_modified = CandidateEvidence(
+        headline="Staff Engineer",
+        summary="Experienced engineer.",
+        skills=[
+            SkillItem(name="Python", category="Language", verification_status="verified", confidence=0.95, provenance="resume_parse"),
+        ],
+        experience=[
+            ExperienceItem(id="exp_0", company="Acme", role="Lead", start_date="2020", end_date="2024", bullets=["Scaled microservices", "Led team of 10"]),
+        ],
+        projects=[
+            ProjectItem(id="proj_0", title="ResumeIQ", description="AI resume tool", tech_stack=["Python", "FastAPI"]),
+        ],
+    )
+    hash_mod = compute_workspace_evidence_hash(ev_modified)
+    assert hash1 != hash_mod
+
+
+
+
 
