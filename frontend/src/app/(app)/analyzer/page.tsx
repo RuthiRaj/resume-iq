@@ -71,6 +71,17 @@ interface JobIntelligenceData {
   summary?: string;
 }
 
+async function computeSha256(text: string): Promise<string> {
+  if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text.trim());
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return "";
+}
+
 function AnalyzerContent() {
   const searchParams = useSearchParams();
   const resumeIdParam = searchParams.get("resumeId");
@@ -79,7 +90,7 @@ function AnalyzerContent() {
   const { user } = useAuth();
 
   const [selectedResumeId, setSelectedResumeId] = useState<string>(
-    resumeIdParam || (resumes[0]?.id || "workspace")
+    resumeIdParam || "workspace"
   );
   const [jobTitle, setJobTitle] = useState("Senior Full Stack Engineer");
   const [jobCompany, setJobCompany] = useState("Stripe");
@@ -120,11 +131,87 @@ function AnalyzerContent() {
   const [isForkingVariant, setIsForkingVariant] = useState(false);
   const [forkVariantError, setForkVariantError] = useState<string | null>(null);
 
-  // Automatically restore saved analysis when selecting an analyzed resume
+  const [cachedWorkspaceAnalysis, setCachedWorkspaceAnalysis] = useState<any | null>(null);
+  const [activeJdHash, setActiveJdHash] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    computeSha256(jobDescription).then((hash) => {
+      if (!cancelled) setActiveJdHash(hash);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobDescription]);
+
+  useEffect(() => {
+    if (!user) return;
+    let isCancelled = false;
+
+    const fetchWorkspaceAnalysis = async () => {
+      try {
+        const idToken = await user.getIdToken();
+        const res = await fetch("/api/ai/workspace-analysis", {
+          headers: {
+            Authorization: `Bearer ${idToken}`,
+          },
+        });
+        if (res.status === 200 && !isCancelled) {
+          const data = await res.json();
+          setCachedWorkspaceAnalysis(data);
+        } else if (res.status === 404 && !isCancelled) {
+          setCachedWorkspaceAnalysis(null);
+        }
+      } catch {
+        // Ignore background fetch error
+      }
+    };
+
+    fetchWorkspaceAnalysis();
+    return () => {
+      isCancelled = true;
+    };
+  }, [user]);
+
+  // Automatically restore saved analysis when selecting an analyzed resume or live workspace matching active JD
   const lastLoadedKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (selectedResumeId && selectedResumeId !== "workspace") {
+    if (selectedResumeId === "workspace") {
+      if (cachedWorkspaceAnalysis && typeof cachedWorkspaceAnalysis.atsScore === "number") {
+        const cachedHash =
+          cachedWorkspaceAnalysis.metadata?.jobDescriptionHash ||
+          cachedWorkspaceAnalysis.jobDescriptionHash;
+
+        if (cachedHash && activeJdHash && cachedHash === activeJdHash) {
+          const workspaceKey = `workspace_${cachedWorkspaceAnalysis.metadata?.analyzedAt || ""}_${cachedWorkspaceAnalysis.atsScore}`;
+          if (lastLoadedKeyRef.current === workspaceKey) {
+            return;
+          }
+          lastLoadedKeyRef.current = workspaceKey;
+
+          setOverallScore(cachedWorkspaceAnalysis.atsScore);
+          if (cachedWorkspaceAnalysis.scoreBreakdown) {
+            setRelevanceScore(cachedWorkspaceAnalysis.scoreBreakdown.relevance);
+            setKeywordScore(cachedWorkspaceAnalysis.scoreBreakdown.keywords);
+            setImpactScore(cachedWorkspaceAnalysis.scoreBreakdown.metrics);
+            setFormatScore(cachedWorkspaceAnalysis.scoreBreakdown.formatting);
+          }
+          setSummaryFeedback(cachedWorkspaceAnalysis.summaryFeedback || "");
+          setMatchingSkills(cachedWorkspaceAnalysis.matchingSkills || []);
+          setMissingSkills(cachedWorkspaceAnalysis.missingSkills || []);
+          setPartialSkills(cachedWorkspaceAnalysis.partialSkills || []);
+          setJobIntelligence(cachedWorkspaceAnalysis.jobIntelligence || null);
+          setRequirementMatches(cachedWorkspaceAnalysis.requirementMatches || []);
+          setRemediationSuggestions(cachedWorkspaceAnalysis.remediationSuggestions || []);
+          setHasAnalyzed(true);
+        } else {
+          lastLoadedKeyRef.current = null;
+        }
+      } else {
+        lastLoadedKeyRef.current = null;
+      }
+    } else if (selectedResumeId) {
       const found = resumes.find((r) => r.id === selectedResumeId);
       if (found && typeof found.atsScore === "number") {
         const resumeAnalysisKey = `${found.id}_${found.lastAnalyzedAt || ""}_${found.atsScore}`;
@@ -160,7 +247,7 @@ function AnalyzerContent() {
     } else {
       lastLoadedKeyRef.current = null;
     }
-  }, [selectedResumeId, resumes]);
+  }, [selectedResumeId, resumes, cachedWorkspaceAnalysis, activeJdHash]);
 
   const handleRunAnalysis = async () => {
     if (!user) {
@@ -231,6 +318,11 @@ function AnalyzerContent() {
           if (sug.suggestedBullet) editMap[sug.id] = sug.suggestedBullet;
         });
         setEditingBullets((prev) => ({ ...prev, ...editMap }));
+      }
+
+      if (selectedResumeId === "workspace") {
+        setCachedWorkspaceAnalysis(data);
+        lastLoadedKeyRef.current = `workspace_${data.metadata?.analyzedAt || ""}_${data.atsScore}`;
       }
 
       // Local component state is already updated above.
@@ -485,6 +577,55 @@ function AnalyzerContent() {
             Load Sample Stripe JD
           </Button>
         </CardHeader>
+        {selectedResumeId === "workspace" &&
+          cachedWorkspaceAnalysis &&
+          activeJdHash &&
+          cachedWorkspaceAnalysis.metadata?.jobDescriptionHash &&
+          cachedWorkspaceAnalysis.metadata.jobDescriptionHash !== activeJdHash && (
+            <div className="mx-6 mt-4 rounded-card border border-accent/40 bg-accent-soft/30 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+                <div className="text-small">
+                  <div className="font-semibold text-primary">Saved Workspace Analysis Available</div>
+                  <p className="text-secondary mt-0.5">
+                    A prior ATS scan for <span className="font-medium text-primary">{cachedWorkspaceAnalysis.metadata?.targetRole || "Target Role"}</span>
+                    {cachedWorkspaceAnalysis.metadata?.targetCompany ? ` at ${cachedWorkspaceAnalysis.metadata.targetCompany}` : ""} (Score: {cachedWorkspaceAnalysis.atsScore}/100) is stored in your Master Workspace. Active job description text differs from that scan.
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 gap-1.5 text-accent border-accent/40 hover:bg-accent-soft"
+                onClick={() => {
+                  if (cachedWorkspaceAnalysis.metadata?.targetRole) {
+                    setJobTitle(cachedWorkspaceAnalysis.metadata.targetRole);
+                  }
+                  if (cachedWorkspaceAnalysis.metadata?.targetCompany) {
+                    setJobCompany(cachedWorkspaceAnalysis.metadata.targetCompany);
+                  }
+                  setOverallScore(cachedWorkspaceAnalysis.atsScore);
+                  if (cachedWorkspaceAnalysis.scoreBreakdown) {
+                    setRelevanceScore(cachedWorkspaceAnalysis.scoreBreakdown.relevance);
+                    setKeywordScore(cachedWorkspaceAnalysis.scoreBreakdown.keywords);
+                    setImpactScore(cachedWorkspaceAnalysis.scoreBreakdown.metrics);
+                    setFormatScore(cachedWorkspaceAnalysis.scoreBreakdown.formatting);
+                  }
+                  setSummaryFeedback(cachedWorkspaceAnalysis.summaryFeedback || "");
+                  setMatchingSkills(cachedWorkspaceAnalysis.matchingSkills || []);
+                  setMissingSkills(cachedWorkspaceAnalysis.missingSkills || []);
+                  setPartialSkills(cachedWorkspaceAnalysis.partialSkills || []);
+                  setJobIntelligence(cachedWorkspaceAnalysis.jobIntelligence || null);
+                  setRequirementMatches(cachedWorkspaceAnalysis.requirementMatches || []);
+                  setRemediationSuggestions(cachedWorkspaceAnalysis.remediationSuggestions || []);
+                  setHasAnalyzed(true);
+                }}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Restore Saved Scan
+              </Button>
+            </div>
+          )}
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
@@ -497,12 +638,16 @@ function AnalyzerContent() {
                 }}
                 className="flex h-9 w-full rounded-input border border-border bg-surface px-3 py-1.5 text-body text-primary focus:outline-none focus:ring-1 focus:ring-accent"
               >
-                <option value="workspace">Master Career Workspace Profile (Live)</option>
-                {resumes.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.title} ({r.template.toUpperCase()})
-                  </option>
-                ))}
+                <optgroup label="Source of Truth">
+                  <option value="workspace">Master Career Workspace (Live Fact Base)</option>
+                </optgroup>
+                <optgroup label="Saved Resume Snapshots">
+                  {resumes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.title} ({r.template.toUpperCase()})
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 

@@ -27,6 +27,8 @@ import {
   Check,
   Layout,
   RefreshCw,
+  ArrowUpRight,
+  Loader2,
 } from "lucide-react";
 
 function BuilderContent() {
@@ -45,6 +47,7 @@ function BuilderContent() {
     resumes,
     addResume,
     updateResume,
+    updateProfile,
   } = useCareer();
 
   // Active working resume
@@ -133,6 +136,27 @@ function BuilderContent() {
     setCustomSummary(factualSummary);
     setIsRegeneratingSection(null);
     showToast("Summary refined successfully", "success");
+  };
+
+  const [isSyncingSummary, setIsSyncingSummary] = useState(false);
+
+  const handleSyncSummaryToWorkspace = async () => {
+    if (!customSummary || !customSummary.trim()) {
+      showToast("Cannot sync an empty summary", "error");
+      return;
+    }
+    setIsSyncingSummary(true);
+    try {
+      await updateProfile({
+        ...profile,
+        summary: customSummary.trim(),
+      });
+      showToast("Summary synchronized to Master Career Workspace", "success");
+    } catch (err: any) {
+      showToast(err.message || "Failed to sync summary to Master Workspace", "error");
+    } finally {
+      setIsSyncingSummary(false);
+    }
   };
 
   const handleSaveResume = async () => {
@@ -292,7 +316,7 @@ function BuilderContent() {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-h1 font-semibold text-primary">Resume Builder & Live Editor</h1>
-            <Badge variant="accent">AI Tailoring Active</Badge>
+            <Badge variant="accent">Master Workspace Derived</Badge>
           </div>
           <p className="text-small text-secondary mt-0.5">
             Fine-tune sections, regenerate bullet points with targeted keywords, or generate full targeted variants.
@@ -405,16 +429,33 @@ function BuilderContent() {
                   <CardTitle>Executive Summary</CardTitle>
                   <CardDescription>Tailor opening statement for {targetRole}</CardDescription>
                 </div>
-                <Button
-                  onClick={handleRegenerateSummary}
-                  variant="outline"
-                  size="sm"
-                  disabled={isRegeneratingSection === "summary"}
-                  className="gap-1.5 text-accent border-accent/30"
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>{isRegeneratingSection === "summary" ? "Refining..." : "AI Tailor"}</span>
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={handleSyncSummaryToWorkspace}
+                    variant="outline"
+                    size="sm"
+                    disabled={isSyncingSummary || !customSummary?.trim()}
+                    className="gap-1.5"
+                    title="Update the authoritative summary in your Master Career Workspace"
+                  >
+                    {isSyncingSummary ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                    )}
+                    <span>Sync to Workspace</span>
+                  </Button>
+                  <Button
+                    onClick={handleRegenerateSummary}
+                    variant="outline"
+                    size="sm"
+                    disabled={isRegeneratingSection === "summary"}
+                    className="gap-1.5 text-accent border-accent/30"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>{isRegeneratingSection === "summary" ? "Refining..." : "AI Tailor"}</span>
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <Textarea

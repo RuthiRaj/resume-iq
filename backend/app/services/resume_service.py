@@ -455,6 +455,18 @@ async def persist_analysis_results(
 ) -> None:
     """Persists analysis results to the user's Firestore document asynchronously."""
     if resume_id == "workspace":
+        doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/analyses/workspace"
+        headers = {"Authorization": f"Bearer {user.token}", "Content-Type": "application/json"}
+        client = get_http_client()
+        payload = analysis.model_dump(by_alias=True)
+        fields_body = {"fields": _encode_firestore_fields(payload)}
+        try:
+            await client.patch(doc_url, headers=headers, json=fields_body)
+        except Exception as e:
+            logger.warning(
+                f"Failed to persist workspace analysis to Firestore: {str(e)}",
+                extra={"event": "firestore_write_error", "error_type": type(e).__name__, "component": "resume_service"},
+            )
         return
 
     _validate_safe_id(resume_id, "resume ID")
@@ -539,8 +551,32 @@ async def save_resume_snapshot(
         return False
 
 
+async def get_workspace_analysis(user: AuthenticatedUser) -> Optional[AnalyzeResponse]:
+    """Retrieves the candidate's latest derived workspace ATS analysis from Firestore."""
+    doc_url = f"{_get_firestore_base_url()}/users/{user.uid}/analyses/workspace"
+    headers = {"Authorization": f"Bearer {user.token}"}
+    client = get_http_client()
+    try:
+        res = await client.get(doc_url, headers=headers)
+        if res.status_code == 200:
+            decoded = _decode_firestore_doc(res.json())
+            return AnalyzeResponse.model_validate(decoded)
+        elif res.status_code != 404:
+            logger.warning(
+                f"Firestore get_workspace_analysis returned status {res.status_code}",
+                extra={"event": "firestore_read_error", "status_code": res.status_code, "component": "resume_service"},
+            )
+    except Exception as e:
+        logger.warning(
+            f"Failed to get workspace analysis: {str(e)}",
+            extra={"event": "firestore_read_error", "error_type": type(e).__name__, "component": "resume_service"},
+        )
+    return None
+
+
 class ResumeService:
     get_candidate_resume_data = staticmethod(get_candidate_resume_data)
     persist_analysis_results = staticmethod(persist_analysis_results)
+    get_workspace_analysis = staticmethod(get_workspace_analysis)
     get_resume_document = staticmethod(get_resume_document)
     save_resume_snapshot = staticmethod(save_resume_snapshot)

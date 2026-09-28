@@ -31,6 +31,7 @@ SUBCOLLECTIONS = [
     "resumes",
     "roadmaps",
     "ingestions",
+    "analyses",
 ]
 
 
@@ -196,6 +197,7 @@ class ProfileService:
             "targeted_variants": subcol_data.get("resumes", []),
             "career_roadmaps": subcol_data.get("roadmaps", []),
             "ingestion_drafts": subcol_data.get("ingestions", []),
+            "derived_analyses": subcol_data.get("analyses", []),
         }
 
     @staticmethod
