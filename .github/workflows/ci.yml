@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ main, master ]
 
+permissions:
+  contents: write
+  statuses: write
+  pull-requests: write
+
 jobs:
   backend-test:
     name: Backend Tests & Lint
@@ -29,6 +34,7 @@ jobs:
           python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 
       - name: Run Backend Tests
+        id: pytest_run
         env:
           PYTHONPATH: backend
           FIREBASE_PROJECT_ID: resumeiq-3cfe6
@@ -39,8 +45,29 @@ jobs:
 
       - name: Report Pytest Failures
         if: ${{ failure() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -m pytest backend/tests -v --tb=short || true
+          python -c "
+          import os, urllib.request, json, subprocess
+          try:
+              res = subprocess.run(['python', '-m', 'pytest', 'backend/tests', '-v', '--tb=short'], capture_output=True, text=True)
+              summary = res.stdout[-3500:] + '\n' + res.stderr[-500:]
+              body = {'body': '### CI Backend Test Failure Log:\n```\n' + summary + '\n```'}
+              repo = os.environ.get('GITHUB_REPOSITORY', 'RuthiRaj/resume-iq')
+              sha = os.environ.get('GITHUB_SHA')
+              token = os.environ.get('GH_TOKEN')
+              req = urllib.request.Request(
+                  f'https://api.github.com/repos/{repo}/commits/{sha}/comments',
+                  headers={'Authorization': f'Bearer {token}', 'User-Agent': 'CI-Reporter', 'Content-Type': 'application/json'},
+                  data=json.dumps(body).encode()
+              )
+              urllib.request.urlopen(req)
+              print('Successfully posted failure comment to commit!')
+          except Exception as e:
+              print('Failed to post commit comment:', e)
+          "
+
 
 
   frontend-check:
