@@ -41,7 +41,7 @@ jobs:
           ENVIRONMENT: test
           AI_ANALYZER_PROVIDER: groq
         run: |
-          python -m pytest backend/tests -v --tb=short
+          python -m pytest backend/tests -v --tb=short 2>&1 | tee /tmp/pytest_out.txt
 
       - name: Report Pytest Failures
         if: ${{ failure() }}
@@ -49,11 +49,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python -c "
-          import os, urllib.request, json, subprocess
+          import os, urllib.request, json
           try:
-              res = subprocess.run(['python', '-m', 'pytest', 'backend/tests', '-v', '--tb=short'], capture_output=True, text=True)
-              summary = res.stdout[-3500:] + '\n' + res.stderr[-500:]
-              body = {'body': '### CI Backend Test Failure Log:\n```\n' + summary + '\n```'}
+              summary = ''
+              if os.path.exists('/tmp/pytest_out.txt'):
+                  with open('/tmp/pytest_out.txt', 'r', encoding='utf-8', errors='ignore') as f:
+                      lines = f.readlines()
+                      summary = ''.join(lines[-100:])
+              body = {'body': '### CI Backend Test Failure Log:\n```\n' + summary[-3500:] + '\n```'}
               repo = os.environ.get('GITHUB_REPOSITORY', 'RuthiRaj/resume-iq')
               sha = os.environ.get('GITHUB_SHA')
               token = os.environ.get('GH_TOKEN')
@@ -67,6 +70,7 @@ jobs:
           except Exception as e:
               print('Failed to post commit comment:', e)
           "
+
 
 
 
