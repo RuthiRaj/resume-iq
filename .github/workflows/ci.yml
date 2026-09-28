@@ -35,7 +35,13 @@ jobs:
           ENVIRONMENT: test
           AI_ANALYZER_PROVIDER: groq
         run: |
-          python -m pytest backend/tests -v
+          python -m pytest backend/tests -v --tb=short
+
+      - name: Report Pytest Failures
+        if: ${{ failure() }}
+        run: |
+          python -m pytest backend/tests -v --tb=short || true
+
 
   frontend-check:
     name: Frontend Typecheck, Lint & Build
