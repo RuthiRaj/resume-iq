@@ -39,10 +39,13 @@ class SkillItem(BaseModel):
     name: str
     category: str = "Technical"
     proficiency: str = "Intermediate"
+    years_of_experience: Optional[float] = Field(default=None, alias="yearsOfExperience")
     source_document_id: Optional[str] = Field(default=None, alias="sourceDocumentId")
     source_document_name: Optional[str] = Field(default=None, alias="sourceDocumentName")
     verification_status: Optional[str] = Field(default="verified", alias="verificationStatus")
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    provenance: Optional[str] = None
+    source_context: Optional[str] = Field(default=None, alias="sourceContext")
 
     model_config = ConfigDict(populate_by_name=True)
 

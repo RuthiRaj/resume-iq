@@ -53,6 +53,9 @@ export const SkillSchema = z.object({
   category: z.enum(["Languages", "Frameworks & Libraries", "Cloud & DevOps", "Databases & Tools", "Methodologies & Soft Skills"]),
   proficiency: z.enum(["Beginner", "Intermediate", "Advanced", "Expert"]),
   yearsOfExperience: z.number().min(0).max(50).optional(),
+  verificationStatus: z.enum(["verified", "unverified", "user_confirmed", "attested", "missing", "related_unverified"]).optional(),
+  provenance: z.string().optional(),
+  sourceContext: z.string().optional(),
 });
 
 export const ProjectSchema = z.object({

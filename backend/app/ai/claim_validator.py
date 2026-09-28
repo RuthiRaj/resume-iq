@@ -418,7 +418,8 @@ def validate_summary_grounding(
     # 3. Technologies check (exact word boundaries to prevent 'scalable' -> 'scala' false positive)
     all_known_tech = set()
     for s in candidate_evidence.skills:
-        all_known_tech.add(s.name.lower())
+        if (getattr(s, "verification_status", None) or "verified") == "verified":
+            all_known_tech.add(s.name.lower())
     for e in candidate_evidence.experience:
         for tech in (e.technologies or []):
             all_known_tech.add(tech.lower())

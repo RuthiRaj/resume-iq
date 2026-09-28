@@ -109,8 +109,6 @@ class ResumePlanningService:
                     direct_matched_ids.add(eid)
             elif m.match_class == "user_confirmation_required":
                 user_confirmation.append(m)
-                for eid in m.candidate_evidence_ids:
-                    direct_matched_ids.add(eid)
             elif m.match_class == "related_but_unverified":
                 related_unverified.append(m)
             elif m.match_class == "missing":
@@ -256,7 +254,7 @@ class ResumePlanningService:
 
             m_result = match_by_name.get(key)
             match_class: MatchClass = m_result.match_class if m_result else "missing"
-            is_dem = match_class in ("direct_match", "user_confirmation_required")
+            is_dem = (match_class == "direct_match")
             ev_ids = m_result.candidate_evidence_ids if m_result else []
 
             prioritized_skills.append(
@@ -280,7 +278,7 @@ class ResumePlanningService:
 
             m_result = match_by_name.get(key)
             match_class: MatchClass = m_result.match_class if m_result else "missing"
-            is_dem = match_class in ("direct_match", "user_confirmation_required")
+            is_dem = (match_class == "direct_match")
             ev_ids = m_result.candidate_evidence_ids if m_result else []
 
             prioritized_skills.append(

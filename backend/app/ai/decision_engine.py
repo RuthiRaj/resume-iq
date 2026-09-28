@@ -279,7 +279,7 @@ class DecisionEngine:
         # 6. REVIEW CONDITION: Unverified Evidence Items / Ingestion Drafts
         # =========================================================================
         has_unverified = bool(
-            evidence_items and any(i.verification_status == "unverified" for i in evidence_items)
+            evidence_items and any(i.verification_status in ("unverified", "user_confirmed", "attested") for i in evidence_items)
         )
         if has_unverified:
             evidence_strength = 0.50

@@ -213,6 +213,15 @@ export default function SkillsPage() {
                     <Badge variant="outline" className="text-caption bg-page">
                       {skill.proficiency}
                     </Badge>
+                    {skill.verificationStatus && ["user_confirmed", "unverified", "attested"].includes(skill.verificationStatus) ? (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-amber-500/10 text-amber-500 border-amber-500/30">
+                        Attested
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-500 border-emerald-500/30">
+                        Verified
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-caption text-secondary">
                     {skill.category}

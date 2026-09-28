@@ -360,6 +360,12 @@ class ResumeGenerationService:
             else "None identified."
         )
 
+        unverified_text = (
+            "\n".join(f"- {req_name}: Candidate attested in workspace but lacks verified work experience bullets. Do NOT claim or fabricate verified work achievements." for req_name in (plan.user_confirmation_required or []))
+            if getattr(plan, "user_confirmation_required", None)
+            else ""
+        )
+
         user_prompt = (
             f"TARGET JOB ROLE: {req.target_role}\n"
             f"{f'TARGET COMPANY: {req.target_company}' if req.target_company else ''}\n"
@@ -370,7 +376,8 @@ class ResumeGenerationService:
             f"- Strategic Focus Areas: {', '.join(plan.requirement_strategy.focus_areas) if plan.requirement_strategy.focus_areas else 'Core technical qualifications'}\n"
             f"- Prioritized ATS Keywords: {', '.join(plan.prioritized_keywords[:15])}\n\n"
             f"HARD GAPS & STRICT PROHIBITIONS (DO NOT INVENT OR CLAIM):\n"
-            f"{hard_gaps_text}\n\n"
+            f"{hard_gaps_text}\n"
+            f"{f'UNVERIFIED ATTESTATIONS (DO NOT INVENT WORK BULLETS):' + chr(10) + unverified_text + chr(10) if unverified_text else ''}\n"
             f"CANDIDATE PROFILE SUMMARY:\n{candidate_evidence.summary or candidate_evidence.headline}\n\n"
             f"SELECTED EXPERIENCE (PLANNED):\n{exp_prompt_list}\n\n"
             f"SELECTED PROJECTS (PLANNED):\n{proj_prompt_list}\n\n"
@@ -409,7 +416,11 @@ class ResumeGenerationService:
         t_val1_start = time.perf_counter()
         now_iso = datetime.now(timezone.utc).isoformat()
         change_ledger: List[ChangeRecord] = []
-        candidate_skills = [s.name for s in candidate_evidence.skills]
+        # Only verified skills can support bullet rewrites; unverified/attested skills cannot inject claims
+        candidate_skills = [
+            s.name for s in candidate_evidence.skills
+            if (getattr(s, "verification_status", None) or "verified") == "verified"
+        ]
 
         # Grounding metrics counters
         claims_evaluated = 0

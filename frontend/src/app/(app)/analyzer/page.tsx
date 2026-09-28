@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { LoadingState } from "@/components/common/state-views";
+import { LoadingState, ToastBanner } from "@/components/common/state-views";
+import { AttestSkillModal, AttestSkillFormData } from "@/components/career/AttestSkillModal";
 import {
   Zap,
   CheckCircle2,
@@ -554,15 +555,50 @@ function AnalyzerContent() {
     }
   };
 
-  const handleAddMissingSkill = (skillName: string) => {
-    addSkill({
-      name: skillName,
-      category: "Cloud & DevOps",
-      proficiency: "Intermediate",
-      yearsOfExperience: 1,
-    });
-    setMissingSkills((prev) => prev.filter((s) => s.name !== skillName));
-    setMatchingSkills((prev) => [...prev, { name: skillName, context: "Added to Career Profile" }]);
+  const [attestingSkillName, setAttestingSkillName] = useState<string | null>(null);
+  const [isAttestModalOpen, setIsAttestModalOpen] = useState(false);
+  const [isSubmittingAttestation, setIsSubmittingAttestation] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
+
+  const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
+  const handleOpenAttestModal = (skillName: string) => {
+    setAttestingSkillName(skillName);
+    setIsAttestModalOpen(true);
+  };
+
+  const handleConfirmAttestSkill = async (formData: AttestSkillFormData) => {
+    setIsSubmittingAttestation(true);
+    try {
+      await addSkill({
+        name: formData.name.trim(),
+        category: formData.category,
+        proficiency: formData.proficiency,
+        yearsOfExperience: formData.yearsOfExperience,
+        verificationStatus: "user_confirmed",
+        provenance: "user_attestation",
+        sourceContext: formData.context.trim(),
+      });
+      showToast(
+        `Skill '${formData.name}' recorded as user-attested in Workspace. Re-analyzing to evaluate role fit...`,
+        "info"
+      );
+      setIsAttestModalOpen(false);
+      setAttestingSkillName(null);
+
+      // Re-run analysis against the live workspace so backend classification authoritatively evaluates updated evidence
+      if (selectedResumeId === "workspace") {
+        await handleRunAnalysis();
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to attest skill", "error");
+      throw err;
+    } finally {
+      setIsSubmittingAttestation(false);
+    }
   };
 
   const handleLoadSampleJD = () => {
@@ -582,6 +618,11 @@ function AnalyzerContent() {
           Perform deterministic ATS scoring, discover keyword gaps, extract structured Job Intelligence, and verify Requirement Evidence Matching powered by Groq.
         </p>
       </div>
+
+      {/* Toast Notification Banner */}
+      {toast && (
+        <ToastBanner message={toast.message} type={toast.type} />
+      )}
 
       {/* Error Banner */}
       {errorMessage && (
@@ -1522,12 +1563,12 @@ function AnalyzerContent() {
                         <div className="text-caption text-secondary mt-0.5">{s.reason}</div>
                       </div>
                       <Button
-                        onClick={() => handleAddMissingSkill(s.name)}
+                        onClick={() => handleOpenAttestModal(s.name)}
                         variant="outline"
                         size="sm"
-                        className="text-caption h-7 px-2 shrink-0 border-status-error/40 text-status-error hover:bg-status-error-soft"
+                        className="text-caption h-7 px-2 shrink-0 border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10"
                       >
-                        + Add Skill
+                        + Attest Skill
                       </Button>
                     </div>
                   ))
@@ -1567,6 +1608,18 @@ function AnalyzerContent() {
           </div>
         </div>
       )}
+
+      {/* Structured Candidate Skill Attestation Modal */}
+      <AttestSkillModal
+        isOpen={isAttestModalOpen}
+        onClose={() => {
+          setIsAttestModalOpen(false);
+          setAttestingSkillName(null);
+        }}
+        skillName={attestingSkillName || ""}
+        onConfirm={handleConfirmAttestSkill}
+        isSubmitting={isSubmittingAttestation}
+      />
     </div>
   );
 }

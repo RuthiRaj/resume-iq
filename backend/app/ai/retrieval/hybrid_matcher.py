@@ -258,12 +258,17 @@ class HybridMatcher:
                 snippets = [item.title for item in exact_items]
                 has_metrics = any(len(item.metrics) > 0 for item in exact_items)
 
-                # Check if only standalone skill tag without narrative evidence
+                # Check if only standalone skill tag or unverified/attested without narrative evidence
                 only_tag = all(item.source_type == "skills" for item in exact_items)
-                if only_tag and importance == "MustHave":
+                has_unverified = any(item.verification_status in ("unverified", "user_confirmed", "attested") for item in exact_items)
+                if (only_tag and importance == "MustHave") or has_unverified:
                     match_class: MatchClass = "user_confirmation_required"
-                    explanation = f"'{norm_req_name}' is listed as a skill tag in workspace, but lacks accomplishment bullets or project evidence."
-                    confidence = 0.85
+                    explanation = (
+                        f"'{norm_req_name}' is user-attested in workspace, but lacks verified work experience or project evidence."
+                        if has_unverified
+                        else f"'{norm_req_name}' is listed as a skill tag in workspace, but lacks accomplishment bullets or project evidence."
+                    )
+                    confidence = 0.75 if has_unverified else 0.85
                     confirmation_count += 1
                 else:
                     match_class = "direct_match"

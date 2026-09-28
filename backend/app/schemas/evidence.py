@@ -20,6 +20,7 @@ VerificationStatus = Literal[
     "verified",
     "unverified",
     "user_confirmed",
+    "attested",
     "missing",
     "related_unverified",
 ]

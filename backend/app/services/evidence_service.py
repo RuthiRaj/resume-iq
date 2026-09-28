@@ -152,6 +152,8 @@ class EvidenceService:
             norm_name = normalize_skill_name(skill.name)
             norm_cat = normalize_skill_category(norm_name, skill.category or "Other")
             skill_conf = getattr(skill, "confidence", None)
+            verif_status = getattr(skill, "verification_status", "verified") or "verified"
+            default_conf = 0.70 if verif_status in ("user_confirmed", "unverified", "attested") else 0.85
             items.append(
                 EvidenceItem(
                     evidenceId=f"ev_{item_id}",
@@ -170,8 +172,8 @@ class EvidenceService:
                     domain=norm_cat,
                     sourceDocumentId=skill.source_document_id,
                     sourceDocumentName=skill.source_document_name,
-                    verificationStatus=getattr(skill, "verification_status", "verified") or "verified",
-                    confidence=float(skill_conf if skill_conf is not None else 0.85),
+                    verificationStatus=verif_status,
+                    confidence=float(skill_conf if skill_conf is not None else default_conf),
                 )
             )
 
