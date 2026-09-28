@@ -29,6 +29,9 @@ import {
   RefreshCw,
   ArrowUpRight,
   Loader2,
+  Target,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 function BuilderContent() {
@@ -65,6 +68,29 @@ function BuilderContent() {
   const [targetCompany, setTargetCompany] = useState(
     existingResume ? (existingResume.targetCompany || "") : ""
   );
+  const [jobDescription, setJobDescription] = useState<string>(
+    existingResume?.jobDescription || ""
+  );
+  const [showJdPanel, setShowJdPanel] = useState(Boolean(existingResume?.jobDescription));
+
+  // Current fit / ATS score from resume
+  const currentFitScore = existingResume?.currentScore ?? existingResume?.atsScore ?? existingResume?.score ?? null;
+
+  // Derive target skill match context from candidate skills vs target job description
+  const targetSkillContext = React.useMemo(() => {
+    if (!jobDescription.trim()) return null;
+    const jdLower = jobDescription.toLowerCase();
+    const candidateSkillNames = skills.map((s) => s.name);
+    const matched = candidateSkillNames.filter((name) => jdLower.includes(name.toLowerCase()));
+    const existingMatches = existingResume?.analysisResults?.matchingSkills?.map((m) => m.name) || [];
+    const allMatched = Array.from(new Set([...matched, ...existingMatches]));
+    const existingMissing = existingResume?.analysisResults?.missingSkills?.map((m) => m.name) || [];
+
+    return {
+      matched: allMatched,
+      missing: existingMissing,
+    };
+  }, [jobDescription, skills, existingResume?.analysisResults]);
 
   // Section level custom overrides
   const [customSummary, setCustomSummary] = useState(
@@ -179,6 +205,7 @@ function BuilderContent() {
           title: resumeTitle,
           targetRole,
           targetCompany,
+          jobDescription: jobDescription.trim() || undefined,
           template: activeTemplate,
           sections: {
             summary: customSummary,
@@ -195,6 +222,7 @@ function BuilderContent() {
           title: resumeTitle,
           targetRole,
           targetCompany,
+          jobDescription: jobDescription.trim() || undefined,
           template: activeTemplate,
           lastEdited: new Date().toISOString().split("T")[0],
           score: 0,
@@ -330,7 +358,7 @@ function BuilderContent() {
             onClick={() => {
               setGenerateRole(targetRole);
               setGenerateCompany(targetCompany);
-              setGenerateJobDesc("");
+              setGenerateJobDesc(jobDescription || "");
               setGenerateError(null);
               setIsGenerateModalOpen(true);
             }}
@@ -360,7 +388,7 @@ function BuilderContent() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Editor Controls Sidebar (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
-          {/* Metadata Card */}
+          {/* Metadata Card with Target Context */}
           <Card>
             <CardContent className="p-4 space-y-3">
               <div className="space-y-1">
@@ -395,6 +423,119 @@ function BuilderContent() {
                     placeholder="e.g. Stripe"
                   />
                 </div>
+              </div>
+
+              {/* Target Job Description & Role Context */}
+              <div className="pt-2 border-t border-border/60">
+                <button
+                  type="button"
+                  onClick={() => setShowJdPanel(!showJdPanel)}
+                  className="flex items-center justify-between w-full py-1 text-left group"
+                >
+                  <div className="flex items-center gap-2">
+                    <Target className="h-4 w-4 text-accent" />
+                    <span className="text-small font-medium text-primary group-hover:text-accent transition-colors">
+                      Target Job Description & Role Context
+                    </span>
+                    {jobDescription.trim() && (
+                      <Badge variant="accent" className="text-[10px] px-1.5 py-0">Active JD</Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {currentFitScore !== null && (
+                      <Badge variant={currentFitScore >= 70 ? "success" : "warning"} className="text-[10px] px-1.5 py-0">
+                        Fit: {currentFitScore}/100
+                      </Badge>
+                    )}
+                    {showJdPanel ? (
+                      <ChevronUp className="h-4 w-4 text-secondary" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-secondary" />
+                    )}
+                  </div>
+                </button>
+
+                {showJdPanel && (
+                  <div className="mt-3 space-y-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-caption text-secondary">
+                          Job Description Requirements
+                        </label>
+                        <span className="text-[11px] text-muted">
+                          {jobDescription.trim().length} chars
+                        </span>
+                      </div>
+                      <Textarea
+                        rows={4}
+                        value={jobDescription}
+                        onChange={(e) => setJobDescription(e.target.value)}
+                        placeholder="Paste target job description to evaluate role fit and tailor content..."
+                        className="text-small font-mono leading-relaxed"
+                      />
+                    </div>
+
+                    {/* Matched & Missing Skills Context */}
+                    {targetSkillContext && (
+                      <div className="space-y-2 pt-1">
+                        {targetSkillContext.matched.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] uppercase tracking-wider text-muted font-semibold">
+                              Matched Skills ({targetSkillContext.matched.length})
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {targetSkillContext.matched.slice(0, 8).map((skillName) => (
+                                <Badge key={skillName} variant="success" className="text-[11px] py-0">
+                                  {skillName}
+                                </Badge>
+                              ))}
+                              {targetSkillContext.matched.length > 8 && (
+                                <span className="text-[11px] text-muted self-center">
+                                  +{targetSkillContext.matched.length - 8} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {targetSkillContext.missing.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] uppercase tracking-wider text-muted font-semibold">
+                              Target Missing Skills ({targetSkillContext.missing.length})
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {targetSkillContext.missing.slice(0, 6).map((skillName) => (
+                                <Badge key={skillName} variant="warning" className="text-[11px] py-0">
+                                  {skillName}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end pt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!jobDescription.trim()}
+                        onClick={() => {
+                          setGenerateRole(targetRole);
+                          setGenerateCompany(targetCompany);
+                          setGenerateJobDesc(jobDescription);
+                          setGenerateError(null);
+                          setIsGenerateModalOpen(true);
+                        }}
+                        className="gap-1.5 text-xs text-accent border-accent/30 hover:bg-accent-soft"
+                      >
+                        <Sparkles className="h-3 w-3" />
+                        <span>Generate Targeted Variant with this JD</span>
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

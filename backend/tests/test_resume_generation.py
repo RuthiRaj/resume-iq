@@ -27,6 +27,10 @@ from app.services.resume_service import ResumeService
 from app.ai.providers.nvidia_provider import NvidiaAnalyzerProvider
 from app.ai.fallback_provider import FallbackProvider
 from app.mcp.mcp_server import generate_resume as mcp_generate_resume
+from app.schemas.analyze import AnalyzeResponse
+from app.schemas.common import ScoreBreakdown, AnalysisMetadata
+from app.schemas.requirement_match import RequirementMatch
+from app.core.security import hash_job_description
 
 
 @pytest.fixture
@@ -773,4 +777,241 @@ async def test_generate_role_targeted_resume_default_fallback_provider(sample_us
 
         assert variant is not None
         assert variant.target_role == "Senior Backend Engineer"
+
+
+# ---------------------------------------------------------------------------
+# Phase 2B: Post-Generation ATS Scoring & Fit Progression Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_generate_role_targeted_resume_with_post_generation_scoring(
+    sample_user,
+    sample_candidate_evidence,
+    monkeypatch,
+):
+    """
+    Phase 2B: Verifies that generate_role_targeted_resume executes post-generation
+    ATS scoring on updated_evidence and populates current_score, current_breakdown,
+    and current_matches.
+    """
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=sample_candidate_evidence))
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", AsyncMock(return_value=True))
+
+    mock_provider = AsyncMock()
+    mock_provider.name = "mock_provider"
+    mock_provider.generate_json.return_value = {
+        "summary": "Senior Python Backend Engineer specializing in scalable APIs.",
+        "experienceRewrites": [],
+        "projectRewrites": [],
+    }
+
+    mock_post_analysis = AnalyzeResponse(
+        ats_score=88,
+        score_breakdown=ScoreBreakdown(
+            relevance=90,
+            keywords=85,
+            metrics=90,
+            formatting=85,
+        ),
+        summary_feedback="Strongly aligned with target backend role.",
+        requirement_matches=[
+            RequirementMatch(
+                requirementName="FastAPI",
+                category="Framework",
+                importance="MustHave",
+                matchStatus="StrongMatch",
+                resumeEvidence="FastAPI APIs",
+                confidence="High",
+            ),
+            RequirementMatch(
+                requirementName="PostgreSQL",
+                category="Database",
+                importance="MustHave",
+                matchStatus="StrongMatch",
+                resumeEvidence="PostgreSQL data layer",
+                confidence="High",
+            ),
+        ],
+        metadata=AnalysisMetadata(
+            provider="mock_provider",
+            model="mock_model",
+            analyzedAt="2026-09-28T12:00:00Z",
+            jobDescriptionHash="hash_123",
+            targetRole="Senior Python Backend Developer",
+        ),
+    )
+    mock_provider.analyze = AsyncMock(return_value=mock_post_analysis)
+
+    req = GenerateResumeRequest(
+        targetRole="Senior Python Backend Developer",
+        targetCompany="Stripe",
+        jobDescription="Seeking Senior Python Backend Developer with FastAPI and PostgreSQL expertise.",
+    )
+
+    variant = await ResumeGenerationService.generate_role_targeted_resume(
+        user=sample_user,
+        req=req,
+        provider=mock_provider,
+    )
+
+    # Post-generation scoring populated
+    assert variant.current_score == 88
+    assert variant.current_breakdown is not None
+    assert variant.current_breakdown.relevance == 90
+    assert variant.current_breakdown.keywords == 85
+    assert len(variant.current_matches) == 2
+    assert variant.current_matches[0].requirement_name == "FastAPI"
+
+
+@pytest.mark.asyncio
+async def test_generate_role_targeted_resume_with_baseline_delta(
+    sample_user,
+    sample_candidate_evidence,
+    monkeypatch,
+):
+    """
+    Phase 2B: Verifies that when workspace baseline analysis is present with matching JD,
+    variant.baseline_score is preserved and score_delta = current_score - baseline_score.
+    """
+    test_jd = "Senior Python Developer with FastAPI, PostgreSQL, and high-throughput systems."
+    jd_hash = hash_job_description(test_jd)
+
+    mock_baseline = AnalyzeResponse(
+        ats_score=68,
+        score_breakdown=ScoreBreakdown(relevance=70, keywords=65, metrics=70, formatting=65),
+        summary_feedback="Baseline workspace analysis.",
+        requirement_matches=[
+            RequirementMatch(
+                requirementName="FastAPI",
+                category="Framework",
+                importance="MustHave",
+                matchStatus="PartialMatch",
+                confidence="Medium",
+            )
+        ],
+        metadata=AnalysisMetadata(
+            provider="groq",
+            model="llama-3.3-70b-versatile",
+            analyzedAt="2026-09-28T11:00:00Z",
+            jobDescriptionHash=jd_hash,
+            targetRole="Senior Python Developer",
+        ),
+    )
+
+    mock_post_analysis = AnalyzeResponse(
+        ats_score=84,
+        score_breakdown=ScoreBreakdown(relevance=85, keywords=85, metrics=85, formatting=80),
+        summary_feedback="Post-tailoring analysis.",
+        requirement_matches=[
+            RequirementMatch(
+                requirementName="FastAPI",
+                category="Framework",
+                importance="MustHave",
+                matchStatus="StrongMatch",
+                confidence="High",
+            )
+        ],
+        metadata=AnalysisMetadata(
+            provider="groq",
+            model="llama-3.3-70b-versatile",
+            analyzedAt="2026-09-28T12:00:00Z",
+            jobDescriptionHash=jd_hash,
+            targetRole="Senior Python Developer",
+        ),
+    )
+
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=sample_candidate_evidence))
+    monkeypatch.setattr(ResumeService, "get_workspace_analysis", AsyncMock(return_value=mock_baseline))
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", AsyncMock(return_value=True))
+
+    mock_provider = AsyncMock()
+    mock_provider.name = "mock_provider"
+    mock_provider.generate_json.return_value = {
+        "summary": "Tailored senior python engineer summary.",
+        "experienceRewrites": [],
+        "projectRewrites": [],
+    }
+    mock_provider.analyze = AsyncMock(return_value=mock_post_analysis)
+
+    req = GenerateResumeRequest(
+        targetRole="Senior Python Developer",
+        jobDescription=test_jd,
+    )
+
+    variant = await ResumeGenerationService.generate_role_targeted_resume(
+        user=sample_user,
+        req=req,
+        provider=mock_provider,
+    )
+
+    assert variant.baseline_score == 68
+    assert variant.current_score == 84
+    assert variant.score_delta == 16  # 84 - 68
+    assert len(variant.baseline_matches) == 1
+    assert variant.baseline_matches[0].match_status == "PartialMatch"
+    assert len(variant.current_matches) == 1
+    assert variant.current_matches[0].match_status == "StrongMatch"
+
+
+@pytest.mark.asyncio
+async def test_generate_role_targeted_resume_ats_scoring_failure_graceful_fallback(
+    sample_user,
+    sample_candidate_evidence,
+    monkeypatch,
+):
+    """
+    Phase 2B: Verifies that if post-generation ATS scoring encounters an exception,
+    generation succeeds safely without crashing or fabricating fake zero scores.
+    """
+    test_jd = "Senior Systems Engineer with Docker and Kubernetes experience."
+    jd_hash = hash_job_description(test_jd)
+
+    mock_baseline = AnalyzeResponse(
+        ats_score=72,
+        score_breakdown=ScoreBreakdown(relevance=75, keywords=70, metrics=70, formatting=70),
+        summary_feedback="Baseline analysis.",
+        requirement_matches=[],
+        metadata=AnalysisMetadata(
+            provider="groq",
+            model="llama-3.3-70b-versatile",
+            analyzedAt="2026-09-28T10:00:00Z",
+            jobDescriptionHash=jd_hash,
+            targetRole="Senior Systems Engineer",
+        ),
+    )
+
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=sample_candidate_evidence))
+    monkeypatch.setattr(ResumeService, "get_workspace_analysis", AsyncMock(return_value=mock_baseline))
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", AsyncMock(return_value=True))
+
+    mock_provider = AsyncMock()
+    mock_provider.name = "mock_provider"
+    mock_provider.generate_json.return_value = {
+        "summary": "Tailored systems engineer summary.",
+        "experienceRewrites": [],
+        "projectRewrites": [],
+    }
+    # Simulate ATS scoring service failure
+    mock_provider.analyze = AsyncMock(side_effect=RuntimeError("AI scoring provider connection timeout"))
+
+    req = GenerateResumeRequest(
+        targetRole="Senior Systems Engineer",
+        jobDescription=test_jd,
+    )
+
+    variant = await ResumeGenerationService.generate_role_targeted_resume(
+        user=sample_user,
+        req=req,
+        provider=mock_provider,
+    )
+
+    # Valid tailored resume generated successfully without crash
+    assert variant.snapshot.summary == "Tailored systems engineer summary."
+    # Grounding integrity: baseline_score is preserved, but current_score remains None (unavailable)
+    assert variant.baseline_score == 72
+    assert variant.current_score is None
+    assert variant.score_delta is None
+    assert variant.current_matches == []
+    assert variant.generation_metadata.get("post_generation_scoring_status") == "unavailable"
+
 

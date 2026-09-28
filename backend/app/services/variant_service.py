@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple, Set
 from fastapi import HTTPException, status
 from app.core.auth import AuthenticatedUser
+from app.core.security import hash_job_description
 from app.schemas.candidate import (
     CandidateEvidence,
     ExperienceItem,
@@ -151,7 +152,10 @@ class VariantService:
         Enforces user ownership and prevents variant-of-variant chaining.
         Supports both saved resume documents and the user's live master 'workspace' evidence.
         """
-        # 1. Fetch and verify ownership of source master resume
+        # 1. Derive deterministic job description hash (normalizing CRLF and line whitespace)
+        jd_hash = hash_job_description(req.job_description)
+
+        # 2. Fetch and verify ownership of source master resume
         if req.master_resume_id == "workspace":
             candidate_evidence = await ResumeService.get_candidate_resume_data(user, "workspace")
             root_master_id = "workspace"
@@ -159,6 +163,17 @@ class VariantService:
             baseline_breakdown = None
             baseline_matches = []
             source_template = "ats"
+
+            # Check if there is an existing derived workspace analysis matching this exact JD
+            ws_analysis = await ResumeService.get_workspace_analysis(user)
+            if (
+                ws_analysis
+                and ws_analysis.metadata
+                and ws_analysis.metadata.job_description_hash == jd_hash
+            ):
+                baseline_score = ws_analysis.ats_score
+                baseline_breakdown = ws_analysis.score_breakdown
+                baseline_matches = ws_analysis.requirement_matches
         else:
             source_doc = await ResumeService.get_resume_document(user, req.master_resume_id)
             if not source_doc:
@@ -172,7 +187,7 @@ class VariantService:
             if source_doc.get("isTargetedVariant") and source_doc.get("masterResumeId"):
                 root_master_id = source_doc["masterResumeId"]
 
-            # 2. Extract strongly-typed candidate snapshot
+            # Extract strongly-typed candidate snapshot
             snapshot_dict = source_doc.get("snapshot") or {}
             candidate_evidence = _parse_candidate_evidence_from_snapshot(snapshot_dict)
 
@@ -185,10 +200,6 @@ class VariantService:
                 RequirementMatch.model_validate(m) for m in raw_matches if isinstance(m, dict) and m.get("requirementName")
             ]
             source_template = source_doc.get("template", "ats")
-
-        # 3. Derive deterministic job description hash (normalizing CRLF and line whitespace)
-        normalized_jd = "\n".join(line.rstrip() for line in req.job_description.strip().splitlines())
-        jd_hash = hashlib.sha256(normalized_jd.encode("utf-8")).hexdigest()
 
         # 4. Generate stable variant ID
         variant_id = f"var_{uuid.uuid4().hex[:12]}"

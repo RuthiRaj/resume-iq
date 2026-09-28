@@ -44,6 +44,12 @@ from app.ai.observability import (
     CURRENT_PRICING_VERSION,
 )
 from app.core.config import settings
+from app.core.logging import get_logger
+from app.core.security import hash_job_description
+from app.ai.orchestrator import run_ats_analysis
+from app.schemas.analyze import AnalyzeResponse
+
+logger = get_logger("app.services.resume_generation")
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he",
@@ -782,8 +788,58 @@ class ResumeGenerationService:
         }
         variant.updated_at = now_iso
 
-        # If no JD provided, ensure score and matches are explicitly None / empty
-        if not (req.job_description and req.job_description.strip()):
+        # Post-generation ATS Scoring & Fit Calculation
+        if req.job_description and req.job_description.strip():
+            # If variant has no baseline yet, check if workspace analysis exists matching JD
+            if variant.baseline_score is None:
+                ws_analysis = await ResumeService.get_workspace_analysis(user)
+                jd_hash = hash_job_description(req.job_description)
+                if ws_analysis and ws_analysis.metadata and ws_analysis.metadata.job_description_hash == jd_hash:
+                    variant.baseline_score = ws_analysis.ats_score
+                    variant.baseline_breakdown = ws_analysis.score_breakdown
+                    variant.baseline_matches = ws_analysis.requirement_matches
+
+            try:
+                # Use active_provider if it has analyze capability; otherwise FallbackProvider
+                ats_provider = active_provider if hasattr(active_provider, "analyze") and callable(getattr(active_provider, "analyze")) else None
+                post_analysis = await run_ats_analysis(
+                    target_role=req.target_role,
+                    target_company=req.target_company or None,
+                    job_description=req.job_description,
+                    candidate_evidence=updated_evidence,
+                    provider=ats_provider,
+                )
+                if isinstance(post_analysis, AnalyzeResponse):
+                    variant.current_score = post_analysis.ats_score
+                    variant.current_breakdown = post_analysis.score_breakdown
+                    variant.current_matches = post_analysis.requirement_matches
+                    if variant.baseline_score is not None:
+                        variant.score_delta = variant.current_score - variant.baseline_score
+                    else:
+                        variant.score_delta = 0
+                elif hasattr(post_analysis, "ats_score") and isinstance(getattr(post_analysis, "ats_score"), int):
+                    variant.current_score = post_analysis.ats_score
+                    variant.current_breakdown = post_analysis.score_breakdown
+                    variant.current_matches = post_analysis.requirement_matches
+                    if variant.baseline_score is not None:
+                        variant.score_delta = variant.current_score - variant.baseline_score
+                    else:
+                        variant.score_delta = 0
+            except Exception as e:
+                logger.warning(
+                    f"Post-generation ATS scoring failed: {str(e)}",
+                    extra={"event": "post_generation_scoring_error", "error": str(e), "component": "resume_generation_service"},
+                )
+                # Grounding integrity: never substitute baseline as current score on failure
+                variant.current_score = None
+                variant.current_breakdown = None
+                variant.current_matches = []
+                variant.score_delta = None
+                if variant.generation_metadata is not None:
+                    variant.generation_metadata["post_generation_scoring_status"] = "unavailable"
+                    variant.generation_metadata["post_generation_scoring_error"] = str(e)
+        else:
+            # If no JD provided, ensure score and matches are explicitly None / empty
             variant.baseline_score = None
             variant.baseline_breakdown = None
             variant.baseline_matches = []

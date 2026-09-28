@@ -74,7 +74,12 @@ interface JobIntelligenceData {
 async function computeSha256(text: string): Promise<string> {
   if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
     const encoder = new TextEncoder();
-    const data = encoder.encode(text.trim());
+    const normalized = text
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .join("\n");
+    const data = encoder.encode(normalized);
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -352,26 +357,49 @@ function AnalyzerContent() {
       const idToken = await user.getIdToken();
       const masterId = selectedResumeId;
 
-      const res = await fetch("/api/variants/create", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({
-          masterResumeId: masterId,
-          targetRole: jobTitle.trim() || "Target Role",
-          targetCompany: jobCompany.trim() || "",
-          jobDescription: jobDescription.trim(),
-        }),
-      });
+      let res: Response;
+      if (masterId === "workspace") {
+        res = await fetch("/api/variants/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            targetRole: jobTitle.trim() || "Target Role",
+            targetCompany: jobCompany.trim() || undefined,
+            jobDescription: jobDescription.trim(),
+          }),
+        });
+      } else {
+        res = await fetch("/api/variants/create", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            masterResumeId: masterId,
+            targetRole: jobTitle.trim() || "Target Role",
+            targetCompany: jobCompany.trim() || "",
+            jobDescription: jobDescription.trim(),
+          }),
+        });
+      }
 
       const data = await res.json();
       if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error("Generation rate limit reached. Please wait a moment before trying again.");
+        }
+        if (res.status === 504) {
+          throw new Error("AI generation timed out. Please retry with a shorter job description.");
+        }
         throw new Error(data.detail || data.error || "Failed to create targeted variant.");
       }
 
-      router.push(`/resumes/targeted/${data.variantId}`);
+      const targetId = data.variantId || data.variant_id;
+      router.push(`/resumes/targeted/${targetId}`);
     } catch (err: any) {
       setForkVariantError(err.message || "Failed to fork targeted variant.");
     } finally {

@@ -14,6 +14,9 @@ from app.services.variant_service import VariantService
 from app.services.resume_service import ResumeService
 from app.core.auth import AuthenticatedUser
 from app.ai.remediation_engine import generate_source_evidence_id
+from app.schemas.analyze import AnalyzeResponse
+from app.schemas.common import ScoreBreakdown, AnalysisMetadata
+from app.core.security import hash_job_description
 from fastapi import HTTPException
 
 
@@ -1327,3 +1330,323 @@ async def test_export_content_all_8_sections_and_state_fidelity(monkeypatch):
     assert "AWS Solutions Architect Professional" in extracted_pdf_text
     assert "ACM Systems Innovation Award" in extracted_pdf_text
     assert "hallucinated 99.999% uptime" not in extracted_pdf_text
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Integration & Adversarial Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_workspace_analysis_propagation_on_matching_jd_hash(monkeypatch):
+    """
+    Phase 2A: Verifies that creating a targeted variant from workspace hydrates
+    baseline_score, baseline_breakdown, and baseline_matches from
+    users/{uid}/analyses/workspace when canonical JD hashes match.
+    """
+    user = AuthenticatedUser(uid="phase2_user_match", token="token_p2_1", email="p2_match@example.com")
+    test_jd = "Senior Python Engineer with FastAPI, PostgreSQL, and distributed caching experience."
+    expected_jd_hash = hash_job_description(test_jd)
+
+    mock_analysis = AnalyzeResponse(
+        ats_score=78,
+        score_breakdown=ScoreBreakdown(
+            relevance=80,
+            keywords=75,
+            metrics=85,
+            formatting=70,
+        ),
+        summary_feedback="Strong backend fundamentals with high metric depth.",
+        requirement_matches=[
+            RequirementMatch(
+                requirementName="Python",
+                category="Language",
+                importance="MustHave",
+                matchStatus="StrongMatch",
+                resumeEvidence="5 years Python APIs",
+                confidence="High",
+            ),
+            RequirementMatch(
+                requirementName="PostgreSQL",
+                category="Database",
+                importance="MustHave",
+                matchStatus="PartialMatch",
+                resumeEvidence="Schema maintenance",
+                confidence="Medium",
+            ),
+        ],
+        metadata=AnalysisMetadata(
+            provider="groq",
+            model="llama-3.3-70b-versatile",
+            analyzedAt="2026-09-28T12:00:00Z",
+            jobDescriptionHash=expected_jd_hash,
+            targetRole="Senior Python Engineer",
+            targetCompany="Acme",
+        ),
+    )
+
+    mock_evidence = CandidateEvidence(
+        headline="Senior Python Engineer",
+        summary="Backend specialist.",
+        experience=[
+            ExperienceItem(
+                id="exp_0",
+                company="Acme",
+                role="Python Engineer",
+                bullets=["Built FastAPI services.", "Managed PostgreSQL databases."],
+                technologies=["Python", "FastAPI", "PostgreSQL"],
+            )
+        ],
+        projects=[],
+        skills=[SkillItem(name="Python", category="Language")],
+    )
+
+    saved_variants = {}
+
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=mock_evidence))
+    monkeypatch.setattr(ResumeService, "get_workspace_analysis", AsyncMock(return_value=mock_analysis))
+    async def mock_save(u, v_id, data):
+        saved_variants[v_id] = data
+        return True
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+
+    req = CreateTargetedVariantRequest(
+        masterResumeId="workspace",
+        targetRole="Senior Python Engineer",
+        targetCompany="Acme",
+        jobDescription=test_jd,
+    )
+
+    variant = await VariantService.create_targeted_variant(user, req)
+
+    # 1. Baseline analysis must be hydrated
+    assert variant.baseline_score == 78
+    assert variant.baseline_breakdown is not None
+    assert variant.baseline_breakdown.relevance == 80
+    assert variant.baseline_breakdown.keywords == 75
+    assert len(variant.baseline_matches) == 2
+    assert variant.baseline_matches[0].requirement_name == "Python"
+    assert variant.baseline_matches[0].match_status == "StrongMatch"
+
+    # 2. At creation time, current equals baseline and score_delta is 0
+    assert variant.current_score == 78
+    assert variant.current_breakdown.relevance == 80
+    assert len(variant.current_matches) == 2
+    assert variant.score_delta == 0
+
+    # 3. Persisted document must carry top-level score and atsScore
+    saved_doc = saved_variants[variant.variant_id]
+    assert saved_doc["score"] == 78
+    assert saved_doc["atsScore"] == 78
+    assert saved_doc["jobDescriptionHash"] == expected_jd_hash
+
+
+@pytest.mark.asyncio
+async def test_workspace_analysis_non_propagation_on_mismatched_jd_hash(monkeypatch):
+    """
+    Phase 2A: Verifies that when a targeted variant is created from workspace
+    with a different JD than the cached workspace analysis, baseline metrics
+    remain None/empty rather than propagating stale scores.
+    """
+    user = AuthenticatedUser(uid="phase2_user_mismatch", token="token_p2_2", email="p2_mismatch@example.com")
+    cached_jd = "Rust Systems Programmer for embedded low-latency networking."
+    new_jd = "Senior React and Next.js Frontend Developer with design systems."
+
+    cached_jd_hash = hash_job_description(cached_jd)
+    new_jd_hash = hash_job_description(new_jd)
+    assert cached_jd_hash != new_jd_hash
+
+    mock_analysis = AnalyzeResponse(
+        ats_score=92,
+        score_breakdown=ScoreBreakdown(relevance=95, keywords=90, metrics=90, formatting=90),
+        summary_feedback="Excellent Rust alignment.",
+        requirement_matches=[
+            RequirementMatch(
+                requirementName="Rust",
+                category="Language",
+                importance="MustHave",
+                matchStatus="StrongMatch",
+                confidence="High",
+            )
+        ],
+        metadata=AnalysisMetadata(
+            provider="groq",
+            model="llama-3.3-70b-versatile",
+            analyzedAt="2026-09-28T12:00:00Z",
+            jobDescriptionHash=cached_jd_hash,
+            targetRole="Rust Systems Programmer",
+        ),
+    )
+
+    mock_evidence = CandidateEvidence(
+        headline="Software Engineer",
+        summary="Engineer background.",
+        experience=[],
+        projects=[],
+        skills=[],
+    )
+
+    saved_variants = {}
+
+    monkeypatch.setattr(ResumeService, "get_candidate_resume_data", AsyncMock(return_value=mock_evidence))
+    monkeypatch.setattr(ResumeService, "get_workspace_analysis", AsyncMock(return_value=mock_analysis))
+    async def mock_save(u, v_id, data):
+        saved_variants[v_id] = data
+        return True
+    monkeypatch.setattr(ResumeService, "save_resume_snapshot", mock_save)
+
+    req = CreateTargetedVariantRequest(
+        masterResumeId="workspace",
+        targetRole="Frontend Developer",
+        jobDescription=new_jd,
+    )
+
+    variant = await VariantService.create_targeted_variant(user, req)
+
+    # Stale analysis must NOT propagate
+    assert variant.baseline_score is None
+    assert variant.baseline_breakdown is None
+    assert variant.baseline_matches == []
+    assert variant.current_score is None
+    assert variant.current_breakdown is None
+    assert variant.current_matches == []
+    assert variant.score_delta is None
+
+
+def test_crlf_vs_lf_canonical_jd_hash_parity():
+    """
+    Phase 2E: Verifies that CRLF (Windows) and LF (Unix) line endings with varying
+    line-trailing whitespace produce identical canonical SHA-256 hashes.
+    """
+    jd_crlf = "We are seeking a Senior Engineer.   \r\n\r\nMust have:\r\n- Python 3.12+  \r\n- Distributed caching\t \r\n"
+    jd_lf = "We are seeking a Senior Engineer.\n\nMust have:\n- Python 3.12+\n- Distributed caching\n"
+
+    hash_crlf = hash_job_description(jd_crlf)
+    hash_lf = hash_job_description(jd_lf)
+
+    assert hash_crlf == hash_lf, f"CRLF hash {hash_crlf} != LF hash {hash_lf}"
+
+
+@pytest.mark.asyncio
+async def test_fit_progression_with_baseline_and_current_matches(monkeypatch):
+    """
+    Phase 2B: Verifies that get_fit_comparison accurately reflects the score delta
+    and requirement resolution between baseline and current analysis.
+    """
+    user = AuthenticatedUser(uid="fit_user_1", token="token_fit_1", email="fit@example.com")
+    variant_id = "var_fit_prog_test"
+
+    variant_doc = {
+        "variantId": variant_id,
+        "masterResumeId": "workspace",
+        "title": "Targeted Variant",
+        "targetRole": "Backend Lead",
+        "targetCompany": "Stripe",
+        "jobDescription": "FastAPI, PostgreSQL, Redis",
+        "jobDescriptionHash": "mock_hash_123",
+        "version": 2,
+        "isTargetedVariant": True,
+        "baselineScore": 65,
+        "baselineBreakdown": {"relevance": 60, "keywords": 70, "metrics": 65, "formatting": 65},
+        "baselineMatches": [
+            {
+                "requirementName": "FastAPI",
+                "category": "Framework",
+                "importance": "MustHave",
+                "matchStatus": "StrongMatch",
+                "resumeEvidence": "FastAPI services",
+                "confidence": "High",
+            },
+            {
+                "requirementName": "Redis",
+                "category": "Database",
+                "importance": "MustHave",
+                "matchStatus": "Missing",
+                "resumeEvidence": "",
+                "confidence": "High",
+            },
+        ],
+        "currentScore": 85,
+        "currentBreakdown": {"relevance": 85, "keywords": 85, "metrics": 85, "formatting": 85},
+        "currentMatches": [
+            {
+                "requirementName": "FastAPI",
+                "category": "Framework",
+                "importance": "MustHave",
+                "matchStatus": "StrongMatch",
+                "resumeEvidence": "FastAPI services",
+                "confidence": "High",
+            },
+            {
+                "requirementName": "Redis",
+                "category": "Database",
+                "importance": "MustHave",
+                "matchStatus": "StrongMatch",
+                "resumeEvidence": "Implemented Redis caching cluster",
+                "confidence": "High",
+            },
+        ],
+        "scoreDelta": 20,
+        "snapshot": {
+            "profile": {"headline": "Backend Lead"},
+            "summary": "Backend specialist with Redis experience.",
+            "experience": [],
+            "projects": [],
+            "skills": [],
+        },
+        "changeLedger": [],
+        "createdAt": "2026-09-28T12:00:00Z",
+        "updatedAt": "2026-09-28T12:00:00Z",
+    }
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", AsyncMock(return_value=variant_doc))
+
+    fit_comp = await VariantService.get_fit_comparison(user, variant_id)
+
+    assert fit_comp.baseline_score == 65
+    assert fit_comp.current_score == 85
+    assert fit_comp.score_delta == 20
+    assert fit_comp.total_gaps_resolved == 1
+    assert fit_comp.total_gaps_remaining == 0
+
+    redis_prog = next(p for p in fit_comp.requirement_progressions if p.requirement_name == "Redis")
+    assert redis_prog.baseline_status == "Missing"
+    assert redis_prog.current_status == "StrongMatch"
+    assert redis_prog.progression == "Resolved"
+
+
+@pytest.mark.asyncio
+async def test_tenant_isolation_prevents_access_to_other_users_variant(monkeypatch):
+    """
+    Verifies that User A cannot read or modify User B's targeted variant.
+    """
+    user_a = AuthenticatedUser(uid="user_victim", token="token_a", email="victim@example.com")
+    user_b = AuthenticatedUser(uid="user_attacker", token="token_b", email="attacker@example.com")
+
+    # Document belongs to user_victim
+    async def mock_get_doc(user, resume_id):
+        if user.uid == "user_victim":
+            return {
+                "variantId": resume_id,
+                "masterResumeId": "workspace",
+                "title": "Private Resume",
+                "targetRole": "Role",
+                "jobDescriptionHash": "hash",
+                "isTargetedVariant": True,
+                "snapshot": {},
+                "changeLedger": [],
+                "createdAt": "2026-09-28T12:00:00Z",
+                "updatedAt": "2026-09-28T12:00:00Z",
+            }
+        return None  # Firestore returns 404 for another tenant's subcollection
+
+    monkeypatch.setattr(ResumeService, "get_resume_document", mock_get_doc)
+
+    # user_a can access their own variant
+    variant = await VariantService.get_targeted_variant(user_a, "var_private_1")
+    assert variant.variant_id == "var_private_1"
+
+    # user_b gets 404
+    with pytest.raises(HTTPException) as exc_info:
+        await VariantService.get_targeted_variant(user_b, "var_private_1")
+    assert exc_info.value.status_code == 404
+

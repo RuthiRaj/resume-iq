@@ -4,8 +4,9 @@ from typing import Dict, Any
 
 
 def hash_job_description(job_description: str) -> str:
-    """Generates a standard SHA-256 hash of normalized job description."""
-    normalized = job_description.strip()
+    """Generates a standard SHA-256 hash of normalized job description.
+    Normalizes CRLF/LF line endings and trims trailing line whitespace."""
+    normalized = "\n".join(line.rstrip() for line in job_description.strip().splitlines())
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
