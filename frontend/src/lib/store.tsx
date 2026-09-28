@@ -14,6 +14,7 @@ import {
   query,
   orderBy,
   serverTimestamp,
+  DocumentData as FirestoreDocumentData,
 } from "firebase/firestore";
 import { ref, deleteObject } from "firebase/storage";
 import {
@@ -576,6 +577,13 @@ interface CareerContextType {
 
 const CareerContext = createContext<CareerContextType | null>(null);
 
+const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
+  ({
+    ...data,
+    id, // after the spread so a stray "id" field in the document cannot override the real doc id
+    tags: Array.isArray(data.tags) ? data.tags : [],
+  }) as ResumeItem;
+
 export function CareerProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
@@ -749,7 +757,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     // 9. Resumes listener
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
       const list: ResumeItem[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ResumeItem));
+      snap.forEach((d) => list.push(normalizeResume(d.id, d.data())));
       setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("resumes");
     }, (err) => markFailed("resumes", err));

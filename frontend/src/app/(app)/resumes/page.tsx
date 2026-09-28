@@ -344,7 +344,7 @@ export default function ResumesPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-1 pt-1">
-                  {res.tags.map((tag) => (
+                  {(res.tags ?? []).map((tag) => (
                     <Badge key={tag} variant="secondary" className="text-[10.5px]">
                       {tag}
                     </Badge>
