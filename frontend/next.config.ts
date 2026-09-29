@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  output: process.env.STANDALONE === "true" ? "standalone" : undefined,
   reactStrictMode: true,
   async redirects() {
     return [

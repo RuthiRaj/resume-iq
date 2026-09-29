@@ -94,16 +94,16 @@ function BuilderContent() {
 
   // Section level custom overrides
   const [customSummary, setCustomSummary] = useState(
-    existingResume?.sections.summary || profile.summary
+    existingResume?.sections?.summary || profile.summary || ""
   );
   const deferredCustomSummary = useDeferredValue(customSummary);
 
   // Selected entities included in this resume
   const [selectedExpIds, setSelectedExpIds] = useState<string[]>(
-    existingResume?.sections.experiences || experience.map((e) => e.id || "")
+    existingResume?.sections?.experiences || experience.map((e) => e.id || "")
   );
   const [selectedProjIds, setSelectedProjIds] = useState<string[]>(
-    existingResume?.sections.projects || projects.map((p) => p.id || "")
+    existingResume?.sections?.projects || projects.map((p) => p.id || "")
   );
 
   // AI regeneration status

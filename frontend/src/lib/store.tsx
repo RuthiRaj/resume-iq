@@ -572,6 +572,7 @@ interface CareerContextType {
   workspaceLoadErrors: string[];
   /** Increments on every real workspace data change (post initial load). */
   workspaceRevision: number;
+  retryWorkspaceLoad: () => void;
 }
 
 
@@ -585,7 +586,7 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
   }) as ResumeItem;
 
 export function CareerProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   const [profile, setProfile] = useState<ProfileData>(defaultEmptyProfile);
   const [education, setEducation] = useState<EducationData[]>([]);
@@ -602,6 +603,11 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   // Bumps every time workspace data actually changes (after initial load).
   // Drives automatic refresh of workspace-sourced tailored resumes.
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [retryTrigger, setRetryTrigger] = useState(0);
+
+  const retryWorkspaceLoad = useCallback(() => {
+    setRetryTrigger((prev) => prev + 1);
+  }, []);
 
   // Keep refs for callbacks needing fresh state without re-creating identity
   const resumesRef = useRef<ResumeItem[]>(resumes);
@@ -626,6 +632,10 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
   // Set up real-time Firestore listeners scoped strictly to user.uid
   useEffect(() => {
+    if (authLoading) {
+      setIsLoaded(false);
+      return;
+    }
     const uid = user?.uid;
     // Reset load state on account change so a new user never briefly sees
     // the previous user's data as "loaded".
@@ -648,6 +658,18 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Track initial load of all 10 collections before marking loaded
+    const ALL_COLLECTIONS = [
+      "profile",
+      "education",
+      "skills",
+      "projects",
+      "experience",
+      "certifications",
+      "achievements",
+      "documents",
+      "resumes",
+      "actions",
+    ];
     const initialLoadedSet = new Set<string>();
     const failedSet = new Set<string>();
     const markLoaded = (name: string) => {
@@ -665,6 +687,16 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       setWorkspaceLoadErrors(Array.from(failedSet));
       markLoaded(name);
     };
+
+    // Safety timeout: if Firestore connection is blocked (e.g. Brave Shields) or hung,
+    // settle pending listeners as failed so the UI renders gracefully with error state.
+    const safetyTimeoutId = setTimeout(() => {
+      ALL_COLLECTIONS.forEach((name) => {
+        if (!initialLoadedSet.has(name)) {
+          markFailed(name, new Error(`Firestore listener connection timed out for ${name}`));
+        }
+      });
+    }, 1200);
     // Called on every workspace snapshot update AFTER the initial load, so the
     // revision only moves when data actually changes (local edits, other
     // devices, or the resync flow writing back). Initial-load snapshots are
@@ -771,6 +803,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     }, (err) => markFailed("actions", err));
 
     return () => {
+      clearTimeout(safetyTimeoutId);
       unsubProfile();
       unsubEducation();
       unsubSkills();
@@ -782,7 +815,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       unsubResumes();
       unsubActions();
     };
-  }, [user?.uid]);
+  }, [user?.uid, authLoading, retryTrigger]);
 
 
   // Profile persistence via backend API proxy
@@ -1283,6 +1316,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       isLoaded,
       workspaceLoadErrors,
       workspaceRevision,
+      retryWorkspaceLoad,
     }),
     [
       profile,
@@ -1326,6 +1360,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       isLoaded,
       workspaceLoadErrors,
       workspaceRevision,
+      retryWorkspaceLoad,
     ]
   );
 
