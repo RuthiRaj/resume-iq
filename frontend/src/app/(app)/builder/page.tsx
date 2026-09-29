@@ -94,7 +94,7 @@ function BuilderContent() {
 
   // Section level custom overrides
   const [customSummary, setCustomSummary] = useState(
-    existingResume?.sections.summary || profile.summary
+    existingResume?.sections?.summary || profile.summary || ""
   );
   const deferredCustomSummary = useDeferredValue(customSummary);
 
@@ -125,9 +125,47 @@ function BuilderContent() {
 
   // Active section tab in editor sidebar
   const [activeTab, setActiveTab] = useState<"summary" | "experience" | "projects" | "skills" | "template">("summary");
+  const lastResumeIdRef = React.useRef<string | null>(null);
+  const resumeTitleRef = React.useRef<HTMLInputElement>(null);
+  const targetRoleRef = React.useRef<HTMLInputElement>(null);
+  const targetCompanyRef = React.useRef<HTMLInputElement>(null);
+  const jobDescriptionRef = React.useRef<HTMLTextAreaElement>(null);
+  const customSummaryRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Keep builder selection in sync with real-time career evidence updates
   useEffect(() => {
+    const resumeId = existingResume?.id ?? null;
+    const resumeChanged = resumeId !== lastResumeIdRef.current;
+    lastResumeIdRef.current = resumeId;
+
+    const isFocused = (ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>) =>
+      typeof document !== "undefined" && document.activeElement === ref.current;
+
+    if (existingResume) {
+      if (resumeChanged || !isFocused(resumeTitleRef)) {
+        setResumeTitle(existingResume.title || "Tailored Resume");
+      }
+      if (resumeChanged || !isFocused(targetRoleRef)) {
+        setTargetRole(existingResume.targetRole || profile.targetRoles?.[0] || "Software Engineer");
+      }
+      if (resumeChanged || !isFocused(targetCompanyRef)) {
+        setTargetCompany(existingResume.targetCompany || "");
+      }
+      if (resumeChanged || !isFocused(jobDescriptionRef)) {
+        setJobDescription(existingResume.jobDescription || "");
+        setShowJdPanel(Boolean(existingResume.jobDescription));
+      }
+      if (resumeChanged || !isFocused(customSummaryRef)) {
+        setCustomSummary(existingResume.sections?.summary || profile.summary || "");
+      }
+      if (resumeChanged) {
+        setSelectedExpIds(existingResume.sections?.experiences || experience.map((item) => item.id || ""));
+        setSelectedProjIds(existingResume.sections?.projects || projects.map((item) => item.id || ""));
+        if (existingResume.template) setActiveTemplate(existingResume.template);
+      }
+      return;
+    }
+
     if (!existingResume) {
       if (experience.length > 0) {
         setSelectedExpIds((prev) => {
@@ -143,8 +181,10 @@ function BuilderContent() {
           return prev.length === newIds.length && prev.every((id, i) => id === newIds[i]) ? prev : newIds;
         });
       }
-      setCustomSummary((prev) => prev || profile.summary);
-      setTargetRole((prev) => (prev === "Software Engineer" && profile.targetRoles?.[0] ? profile.targetRoles[0] : prev));
+      if (!isFocused(customSummaryRef)) setCustomSummary((prev) => prev || profile.summary || "");
+      if (!isFocused(targetRoleRef)) {
+        setTargetRole((prev) => (prev === "Software Engineer" && profile.targetRoles?.[0] ? profile.targetRoles[0] : prev));
+      }
     }
   }, [experience, projects, profile.summary, profile.targetRoles, existingResume]);
 
@@ -426,6 +466,7 @@ function BuilderContent() {
                   Resume Title
                 </label>
                 <Input
+                  ref={resumeTitleRef}
                   value={resumeTitle}
                   onChange={(e) => setResumeTitle(e.target.value)}
                   placeholder="e.g. Senior Frontend Engineer — Stripe"
@@ -438,6 +479,7 @@ function BuilderContent() {
                     Target Role
                   </label>
                   <Input
+                    ref={targetRoleRef}
                     value={targetRole}
                     onChange={(e) => setTargetRole(e.target.value)}
                     placeholder="e.g. Senior Frontend"
@@ -448,6 +490,7 @@ function BuilderContent() {
                     Company
                   </label>
                   <Input
+                    ref={targetCompanyRef}
                     value={targetCompany}
                     onChange={(e) => setTargetCompany(e.target.value)}
                     placeholder="e.g. Stripe"
@@ -497,6 +540,7 @@ function BuilderContent() {
                         </span>
                       </div>
                       <Textarea
+                        ref={jobDescriptionRef}
                         rows={4}
                         value={jobDescription}
                         onChange={(e) => setJobDescription(e.target.value)}
@@ -630,6 +674,7 @@ function BuilderContent() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <Textarea
+                  ref={customSummaryRef}
                   rows={6}
                   value={customSummary}
                   onChange={(e) => setCustomSummary(e.target.value)}

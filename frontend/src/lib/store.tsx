@@ -584,6 +584,17 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
     tags: Array.isArray(data.tags) ? data.tags : [],
   }) as ResumeItem;
 
+const getE2EMockResumes = (): ResumeItem[] | null => {
+  if (
+    typeof window === "undefined" ||
+    window.localStorage.getItem("e2e_bypass_auth") !== "true" ||
+    !Array.isArray((window as any).__E2E_MOCK_RESUMES__)
+  ) {
+    return null;
+  }
+  return (window as any).__E2E_MOCK_RESUMES__.map((resume: ResumeItem) => normalizeResume(resume.id, resume));
+};
+
 export function CareerProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
@@ -595,7 +606,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   const [certifications, setCertifications] = useState<CertificationData[]>([]);
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
-  const [resumes, setResumes] = useState<ResumeItem[]>([]);
+  const [resumes, setResumes] = useState<ResumeItem[]>(() => getE2EMockResumes() || []);
   const [actions, setActions] = useState<RecommendedAction[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [workspaceLoadErrors, setWorkspaceLoadErrors] = useState<string[]>([]);
@@ -641,7 +652,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       setCertifications([]);
       setAchievements([]);
       setDocuments([]);
-      setResumes([]);
+      setResumes(getE2EMockResumes() || []);
       setActions([]);
       setIsLoaded(true);
       return;
@@ -758,9 +769,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
       const list: ResumeItem[] = [];
       snap.forEach((d) => list.push(normalizeResume(d.id, d.data())));
+      list.push(...(getE2EMockResumes() || []));
       setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("resumes");
-    }, (err) => markFailed("resumes", err));
+    }, (err) => {
+      const mockResumes = getE2EMockResumes();
+      if (mockResumes) setResumes(mockResumes);
+      markFailed("resumes", err);
+    });
 
     // 10. Actions listener
     const unsubActions = onSnapshot(collection(db, "users", uid, "actions"), (snap) => {
