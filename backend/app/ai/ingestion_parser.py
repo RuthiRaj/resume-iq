@@ -295,11 +295,17 @@ def _deterministic_parse_resume_text(raw_text: str) -> ParsedCandidateProfile:
     if website_match:
         website = website_match.group(0).strip()
 
-    # Determine full name from first line if it does not look like a section heading or contact line
+    # Determine full name from first line if it does not look like a section heading
     full_name = ""
     headline = ""
     first_line = lines[0]
-    if not any(k in first_line.upper() for k in ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "@", "HTTP", "WWW"]):
+    
+    # Check if first line is an inline contact line e.g. "John Doe | john@example.com | 555-1234"
+    if "|" in first_line:
+        first_segment = first_line.split("|")[0].strip()
+        if not any(k in first_segment.upper() for k in ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "@", "HTTP", "WWW"]):
+            full_name = first_segment
+    elif not any(k in first_line.upper() for k in ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS", "@", "HTTP", "WWW"]):
         full_name = first_line
         # Second line might be headline/role if it doesn't contain contact info
         if len(lines) > 1 and not re.search(r"[@|]|\+?\d{7,}", lines[1]) and not any(k in lines[1].upper() for k in ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS", "PROJECTS"]):
@@ -307,7 +313,7 @@ def _deterministic_parse_resume_text(raw_text: str) -> ParsedCandidateProfile:
 
     # 2. Section Partitioning
     section_patterns = [
-        ("summary", re.compile(r"^(?:EXECUTIVE\s+SUMMARY|PROFESSIONAL\s+SUMMARY|SUMMARY|PROFILE|ABOUT\s+ME)$", re.IGNORECASE)),
+        ("summary", re.compile(r"^(?:EXECUTIVE\s+SUMMARY|PROFESSIONAL\s+SUMMARY|SUMMARY|PROFILE|PROFESSIONAL\s+PROFILE|ABOUT\s+ME|OBJECTIVE|CAREER\s+OBJECTIVE)$", re.IGNORECASE)),
         ("experience", re.compile(r"^(?:WORK\s+EXPERIENCE|PROFESSIONAL\s+EXPERIENCE|EXPERIENCE|EMPLOYMENT\s+HISTORY)$", re.IGNORECASE)),
         ("education", re.compile(r"^(?:EDUCATION|ACADEMIC\s+BACKGROUND|ACADEMIC\s+HISTORY|EDUCATION\s+&\s+QUALIFICATIONS)$", re.IGNORECASE)),
         ("projects", re.compile(r"^(?:TECHNICAL\s+PROJECTS|FEATURED\s+PROJECTS|PROJECTS|KEY\s+PROJECTS|PERSONAL\s+PROJECTS)$", re.IGNORECASE)),
@@ -346,6 +352,22 @@ def _deterministic_parse_resume_text(raw_text: str) -> ParsedCandidateProfile:
     if section_blocks["summary"]:
         summary = " ".join(section_blocks["summary"]).strip()
         summary = _clean_summary_text(summary)
+    elif section_blocks["header"]:
+        # If no explicit summary header was matched, check if there is an unheaded summary paragraph
+        # in the header block following the candidate name and contact lines
+        candidate_summary_lines = []
+        for h_line in section_blocks["header"]:
+            # Skip name line, headline, contact items, bullet lines
+            if h_line == full_name or h_line == headline:
+                continue
+            if re.search(r"[@|]|\+?\d{7,}|(?:https?:\/\/|\.com|\.in|\.org)", h_line, re.IGNORECASE):
+                continue
+            if h_line.startswith("-") or h_line.startswith("•") or h_line.startswith("*"):
+                continue
+            if len(h_line.split()) >= 6:  # multi-word descriptive text
+                candidate_summary_lines.append(h_line)
+        if candidate_summary_lines:
+            summary = _clean_summary_text(" ".join(candidate_summary_lines).strip())
 
     # 4. Extract Skills
     skills: List[SkillItem] = []

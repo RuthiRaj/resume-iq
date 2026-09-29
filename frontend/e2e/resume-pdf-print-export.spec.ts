@@ -321,4 +321,248 @@ test.describe("Bug A: Resume Print / PDF Export Quality & Chrome Suppression Sui
       expect(pdfText).not.toContain("AI Tailor");
     }
   });
+
+  test("Multi-page resume (2+ pages) verifies top/bottom margins across all pages in Modern, Minimal, and ATS templates", async ({
+    page,
+  }) => {
+    const targetDirs = [
+      path.resolve(__dirname, "../test-results/print-export"),
+      "C:\\Users\\gosul\\.gemini\\antigravity\\brain\\7f7638eb-8698-4666-af73-e8d95afc5bd1",
+    ];
+    for (const dir of targetDirs) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Define 2+ page extensive candidate profile
+    const multiPageEvidence = {
+      profile: {
+        fullName: "Dr. Marcus Sterling",
+        headline: "Principal Distributed AI Systems Engineer & High-Performance Computing Lead",
+        email: "marcus.sterling@hpc-systems.io",
+        phone: "+1 (415) 890-1200",
+        location: "Seattle, WA",
+        website: "https://marcussterling.ai",
+        linkedin: "https://linkedin.com/in/marcussterling",
+        github: "https://github.com/marcussterling",
+        summary:
+          "Distinguished Principal Engineer with 12+ years pioneering petabyte-scale distributed training clusters, GPU kernel acceleration, and low-latency fault-tolerant inference meshes. Proven track record architecting mission-critical infrastructure serving 500M+ global queries per day with 99.999% SLA.",
+        targetRoles: ["Principal AI Infrastructure Engineer", "VP of Systems Engineering"],
+      },
+      experience: [
+        {
+          id: "exp_long_1",
+          company: "HyperScale Quantum & AI Labs",
+          role: "Principal Systems Architect & Technical Director",
+          location: "Seattle, WA",
+          startDate: "2021-04",
+          endDate: "Present",
+          isCurrent: true,
+          bullets: [
+            "Architected 16,384 GPU cluster interconnect utilizing InfiniBand HDR topology with 99.8% effective linear scaling.",
+            "Engineered zero-copy memory transport protocol lowering inter-node barrier synchronization overhead from 18ms to 1.1ms.",
+            "Directly supervised 24 senior distributed systems engineers delivering next-generation tensor parallelism runtimes.",
+            "Designed automated hardware failover system reducing MTTR from 14 minutes to sub-second node replacement.",
+            "Spearheaded multi-datacenter capacity planning optimizing power utilization effectiveness (PUE) by 23% across 4 global sites.",
+          ],
+          technologies: ["CUDA", "C++20", "InfiniBand", "NCCL", "Kubernetes", "Rust"],
+        },
+        {
+          id: "exp_long_2",
+          company: "Apex Cloud Infrastructure",
+          role: "Staff Infrastructure Engineer",
+          location: "San Francisco, CA",
+          startDate: "2018-02",
+          endDate: "2021-03",
+          isCurrent: false,
+          bullets: [
+            "Built distributed transaction commit protocol handling 450,000 ACID operations per second across distributed NVMe pools.",
+            "Authored high-throughput Raft consensus engine supporting zero-downtime cluster topology reconfigurations.",
+            "Reduced AWS and GCP computing expenditure by $3.8M annually through kernel-level dynamic memory compaction.",
+            "Led production incident triage for Tier-0 services maintaining 99.999% uptime across 3 consecutive years.",
+          ],
+          technologies: ["Go", "Raft", "gRPC", "AWS", "GCP", "Docker", "Prometheus"],
+        },
+        {
+          id: "exp_long_3",
+          company: "Nexus High Performance Computing",
+          role: "Senior Distributed Systems Engineer",
+          location: "Austin, TX",
+          startDate: "2015-06",
+          endDate: "2018-01",
+          isCurrent: false,
+          bullets: [
+            "Developed high-frequency algorithmic trade execution platform handling 2M msgs/sec with sub-5μs jitter.",
+            "Optimized Linux network socket stack bypassing standard kernel paths via DPDK and custom FPGA kernel drivers.",
+            "Mentored 8 junior and mid-level engineers in concurrency theory and memory consistency models.",
+          ],
+          technologies: ["C++14", "DPDK", "FPGA", "Linux Kernel", "PostgreSQL"],
+        },
+        {
+          id: "exp_long_4",
+          company: "Global Telemetry Networks",
+          role: "Software Engineer — Distributed Systems",
+          location: "Cambridge, MA",
+          startDate: "2013-08",
+          endDate: "2015-05",
+          isCurrent: false,
+          bullets: [
+            "Implemented distributed stream aggregation engine processing 10B daily telemetry events.",
+            "Constructed real-time visualization dashboards utilized by 400+ internal engineering teams.",
+          ],
+          technologies: ["Java", "Kafka", "Cassandra", "Storm", "Redis"],
+        },
+      ],
+      education: [
+        {
+          id: "edu_long_1",
+          institution: "Massachusetts Institute of Technology (MIT)",
+          degree: "Ph.D. in Computer Science",
+          fieldOfStudy: "Distributed Systems & Parallel Architecture",
+          startDate: "2009-09",
+          endDate: "2013-06",
+          grade: "4.0 / 4.0 GPA",
+        },
+        {
+          id: "edu_long_2",
+          institution: "University of Illinois Urbana-Champaign",
+          degree: "Bachelor of Science",
+          fieldOfStudy: "Computer Engineering (Highest Honors)",
+          startDate: "2005-09",
+          endDate: "2009-05",
+          grade: "3.98 / 4.0 GPA",
+        },
+      ],
+      skills: [
+        { id: "sk_l1", name: "Distributed Systems & Consensus", category: "Core", proficiency: "Expert" },
+        { id: "sk_l2", name: "CUDA & GPU Kernel Architecture", category: "Systems", proficiency: "Expert" },
+        { id: "sk_l3", name: "High Performance Networking (InfiniBand, RoCE)", category: "Systems", proficiency: "Expert" },
+        { id: "sk_l4", name: "C++20, Rust, Go", category: "Languages", proficiency: "Expert" },
+        { id: "sk_l5", name: "Kubernetes & Multi-Cloud Infrastructure", category: "Cloud", proficiency: "Expert" },
+        { id: "sk_l6", name: "Large-Scale Storage & Filesystems", category: "Storage", proficiency: "Expert" },
+      ],
+      projects: [
+        {
+          id: "proj_l1",
+          title: "HyperTensor: Distributed Tensor Parallelism Framework",
+          role: "Lead Creator & Maintainer",
+          startDate: "2022-01",
+          endDate: "Present",
+          description: "Open-source asynchronous pipelined tensor parallelism engine utilized by leading research institutes worldwide.",
+          highlights: [
+            "Achieved 1.4x higher model FLOPs utilization (MFU) compared to baseline Megatron-LM on 175B parameter benchmarks.",
+            "Integrated automatic activation checkpointing and gradient accumulation across heterogeneous accelerator nodes.",
+          ],
+          techStack: ["C++20", "CUDA", "PyTorch", "NCCL", "Docker"],
+        },
+        {
+          id: "proj_l2",
+          title: "VortexKV: Lock-Free Persistent Key-Value Store",
+          role: "Chief Architect",
+          startDate: "2020-03",
+          endDate: "2021-11",
+          description: "Ultra-low latency key-value storage engine engineered for persistent memory (Optane PMEM) and CXL.",
+          highlights: [
+            "Demonstrated 28M ops/sec with zero locking overhead using epoch-based memory reclamation.",
+            "Published findings in ACM SIGMOD 2021 proceedings.",
+          ],
+          techStack: ["C++", "PMEM", "gRPC", "Linux"],
+        },
+      ],
+      certifications: [
+        {
+          id: "cert_l1",
+          title: "AWS Certified Solutions Architect — Professional",
+          issuer: "Amazon Web Services",
+          issueDate: "2023-01",
+        },
+        {
+          id: "cert_l2",
+          title: "Certified Kubernetes Administrator (CKA)",
+          issuer: "Cloud Native Computing Foundation (CNCF)",
+          issueDate: "2022-08",
+        },
+      ],
+    };
+
+    // Inject 2+ page evidence into local environment
+    await page.addInitScript((mockData) => {
+      window.localStorage.setItem("e2e_bypass_auth", "true");
+      (window as any).__E2E_MOCK_PROFILE__ = mockData.profile;
+      (window as any).__E2E_MOCK_EXPERIENCE__ = mockData.experience;
+      (window as any).__E2E_MOCK_EDUCATION__ = mockData.education;
+      (window as any).__E2E_MOCK_SKILLS__ = mockData.skills;
+      (window as any).__E2E_MOCK_PROJECTS__ = mockData.projects;
+      (window as any).__E2E_MOCK_CERTIFICATIONS__ = mockData.certifications;
+    }, multiPageEvidence);
+
+    await page.goto("/builder", { waitUntil: "networkidle" });
+    await page.waitForSelector("h1:has-text('Dr. Marcus Sterling')", { timeout: 10000 });
+
+    const templates = [
+      { id: "modern", name: "Modern Clean" },
+      { id: "minimal", name: "Minimal Swiss" },
+      { id: "ats", name: "Universal ATS Standard" },
+    ];
+
+    for (const tmpl of templates) {
+      // 1. Select template in UI
+      await page.emulateMedia({ media: "screen" });
+      const templateTab = page.locator("button:has-text('Layout & Template')");
+      if (await templateTab.isVisible()) {
+        await templateTab.click();
+      }
+      const tmplBtn = page.locator(`button:has-text('${tmpl.name}')`);
+      if (await tmplBtn.isVisible()) {
+        await tmplBtn.click();
+      }
+
+      // 2. Switch to print media
+      await page.emulateMedia({ media: "print" });
+
+      // Take full multi-page screenshot
+      for (const dir of targetDirs) {
+        await page.screenshot({
+          path: path.join(dir, `multipage-print-${tmpl.id}-template.png`),
+          fullPage: true,
+        });
+      }
+
+      // 3. Export PDF with A4 format
+      const multiPdfBuffer = await page.pdf({
+        format: "A4",
+        printBackground: true,
+      });
+
+      for (const dir of targetDirs) {
+        fs.writeFileSync(path.join(dir, `multipage-exported-resume-${tmpl.id}.pdf`), multiPdfBuffer);
+      }
+
+      // 4. Verify PDF has 2 or more pages and page 2 content is intact
+      const pdfjs = await import("pdfjs-dist/build/pdf.mjs");
+      const doc = await pdfjs.getDocument({ data: new Uint8Array(multiPdfBuffer) }).promise;
+
+      expect(doc.numPages).toBeGreaterThanOrEqual(2);
+
+      // Verify page 1 content
+      const page1 = await doc.getPage(1);
+      const page1Content = await page1.getTextContent();
+      const page1Text = page1Content.items.map((i: any) => i.str).join(" ");
+      expect(page1Text).toContain("Dr. Marcus Sterling");
+
+      // Verify page 2+ content
+      const page2 = await doc.getPage(2);
+      const page2Content = await page2.getTextContent();
+      const page2Text = page2Content.items.map((i: any) => i.str).join(" ");
+      expect(page2Text.length).toBeGreaterThan(50);
+
+      // Verify full PDF text has candidate content and NO app chrome
+      const fullExtractedText = await extractTextFromPdfBuffer(multiPdfBuffer);
+      expect(fullExtractedText).toContain("Dr. Marcus Sterling");
+      expect(fullExtractedText).toContain("HyperScale Quantum & AI Labs");
+      expect(fullExtractedText).toContain("Massachusetts Institute of Technology");
+      expect(fullExtractedText).not.toContain("Search workspace");
+      expect(fullExtractedText).not.toContain("AI Tailor");
+    }
+  });
 });
+

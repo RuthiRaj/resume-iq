@@ -92,7 +92,7 @@ export const ResumeModernTemplate = React.memo(function ResumeModernTemplate({ d
   const { profile, education, skills, projects, experience, certifications, customSummary } = data;
 
   return (
-    <div className="bg-white p-8 font-sans text-primary text-[11px] leading-[15px] max-w-[800px] mx-auto border border-border shadow-sm print:border-none print:shadow-none print:max-w-none print:w-full print:m-0 print:p-8 print:text-black">
+    <div className="bg-white p-8 font-sans text-primary text-[11px] leading-[15px] max-w-[800px] mx-auto border border-border shadow-sm print:border-none print:shadow-none print:max-w-none print:w-full print:m-0 print:p-0 print:text-black">
       {/* Header */}
       <div className="border-b-2 border-accent pb-4 mb-4 break-inside-avoid print:break-inside-avoid">
         <h1 className="text-[20px] font-bold text-primary print:text-black tracking-tight">{profile.fullName}</h1>
@@ -236,7 +236,7 @@ export const ResumeMinimalTemplate = React.memo(function ResumeMinimalTemplate({
   const { profile, education, skills, projects, experience, certifications, customSummary } = data;
 
   return (
-    <div className="bg-white p-8 font-sans text-primary text-[11px] leading-[15px] max-w-[800px] mx-auto border border-border shadow-sm print:border-none print:shadow-none print:max-w-none print:w-full print:m-0 print:p-8 print:text-black">
+    <div className="bg-white p-8 font-sans text-primary text-[11px] leading-[15px] max-w-[800px] mx-auto border border-border shadow-sm print:border-none print:shadow-none print:max-w-none print:w-full print:m-0 print:p-0 print:text-black">
       <div className="text-center pb-4 mb-4 border-b border-border break-inside-avoid print:break-inside-avoid">
         <h1 className="text-[22px] font-normal tracking-wide uppercase text-primary print:text-black">
           {profile.fullName}
@@ -352,7 +352,7 @@ export const ResumeAtsTemplate = React.memo(function ResumeAtsTemplate({ data }:
   const { profile, education, skills, projects, experience, certifications, customSummary } = data;
 
   return (
-    <div className="bg-white p-8 font-sans text-black text-[11px] leading-[15px] max-w-[800px] mx-auto border border-border shadow-sm print:border-none print:shadow-none print:max-w-none print:w-full print:m-0 print:p-8">
+    <div className="bg-white p-8 font-sans text-black text-[11px] leading-[15px] max-w-[800px] mx-auto border border-border shadow-sm print:border-none print:shadow-none print:max-w-none print:w-full print:m-0 print:p-0">
       <div className="text-center pb-3 mb-3 border-b-2 border-black break-inside-avoid print:break-inside-avoid">
         <h1 className="text-[20px] font-bold uppercase tracking-tight text-black">
           {profile.fullName}

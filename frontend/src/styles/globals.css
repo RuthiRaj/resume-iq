@@ -55,7 +55,7 @@
 /* Print Styles */
 @page {
   size: A4;
-  margin: 0;
+  margin: 12mm 14mm 12mm 14mm;
 }
 
 @media print {

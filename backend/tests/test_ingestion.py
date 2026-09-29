@@ -477,3 +477,201 @@ async def test_parse_resume_text_summary_isolation_regression(monkeypatch):
     assert "ResumeIQ" in parsed.evidence.projects[0].title
     assert len(parsed.evidence.projects[0].highlights) >= 2
 
+
+# ---------------------------------------------------------------------------
+# 6. Parser Fixtures: 6 Differently Formatted Resumes
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fixture_1_no_summary_heading(monkeypatch):
+    """Fixture 1: No SUMMARY heading; summary paragraph directly follows header."""
+    text = (
+        "Sarah Jenkins\n"
+        "sarah.jenkins@example.com | (555) 234-5678 | San Francisco, CA\n"
+        "github.com/sarahj | linkedin.com/in/sarahjenkins\n\n"
+        "Full-stack software engineer with 5+ years of production experience building high-throughput web applications with TypeScript, React, and Go microservices.\n\n"
+        "WORK EXPERIENCE\n"
+        "CloudFlow Systems\n"
+        "Senior Frontend Engineer\n"
+        "- Reduced time-to-interactive by 42% across core dashboard routes.\n"
+        "- Authored real-time collaborative state synchronization library.\n\n"
+        "EDUCATION\n"
+        "University of California, Berkeley\n"
+        "Bachelor of Science in Computer Science\n"
+    )
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+    parsed = await parse_resume_text(text)
+
+    assert parsed.profile.full_name == "Sarah Jenkins"
+    assert parsed.profile.email == "sarah.jenkins@example.com"
+    assert "Full-stack software engineer with 5+ years" in parsed.profile.summary
+    assert "Sarah Jenkins" not in parsed.profile.summary
+    assert len(parsed.evidence.experience) >= 1
+    assert parsed.evidence.experience[0].company == "CloudFlow Systems"
+    assert len(parsed.evidence.education) >= 1
+    # Missing sections remain empty, never a raw dump
+    assert parsed.evidence.certifications == []
+    assert parsed.evidence.projects == []
+
+
+@pytest.mark.asyncio
+async def test_fixture_2_objective_and_profile_headings(monkeypatch):
+    """Fixture 2: Uses OBJECTIVE / PROFILE headings with different labels."""
+    text = (
+        "David Kim\n"
+        "david.kim@example.org | +1-800-555-0199\n\n"
+        "CAREER OBJECTIVE\n"
+        "Dedicated Data Engineer seeking to leverage expertise in Apache Spark, Kafka, and Snowflake to optimize big data architectures.\n\n"
+        "SKILLS & EXPERTISE\n"
+        "Python, SQL, Apache Spark, Kafka, Snowflake, Docker\n\n"
+        "EMPLOYMENT HISTORY\n"
+        "DataStream Inc.\n"
+        "Data Platform Engineer\n"
+        "- Streamlined streaming ingestion pipelines processing 2TB daily.\n\n"
+        "ACADEMIC BACKGROUND\n"
+        "University of Washington\n"
+        "M.S. in Data Science\n"
+    )
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+    parsed = await parse_resume_text(text)
+
+    assert parsed.profile.full_name == "David Kim"
+    assert parsed.profile.email == "david.kim@example.org"
+    assert "Dedicated Data Engineer seeking to leverage expertise" in parsed.profile.summary
+    assert "OBJECTIVE" not in parsed.profile.summary
+    assert len(parsed.evidence.skills) >= 4
+    assert len(parsed.evidence.experience) >= 1
+    assert len(parsed.evidence.education) >= 1
+    assert parsed.evidence.certifications == []
+
+
+@pytest.mark.asyncio
+async def test_fixture_3_all_caps_formatting(monkeypatch):
+    """Fixture 3: ALL CAPS resume headers and text structure."""
+    text = (
+        "ELENA ROSTOVA\n"
+        "ELENA.ROSTOVA@TECHCORP.IO | +44 20 7946 0912 | GITHUB.COM/EROSTOVA\n\n"
+        "PROFESSIONAL SUMMARY\n"
+        "SENIOR DEVOPS AND PLATFORM SPECIALIST WITH EXTENSIVE EXPERIENCE IN KUBERNETES, TERRAFORM, AND AWS INFRASTRUCTURE AUTOMATION.\n\n"
+        "CORE COMPETENCIES\n"
+        "KUBERNETES, TERRAFORM, AWS, ANSIBLE, PROMETHEUS, GRAFANA\n\n"
+        "PROFESSIONAL EXPERIENCE\n"
+        "GLOBAL FINTECH LTD\n"
+        "LEAD PLATFORM ENGINEER\n"
+        "- MIGRATED 45 MONOLITHIC SERVICES TO KUBERNETES CLUSTERS.\n"
+        "- IMPLEMENTED GIT-OPS WORKFLOWS WITH ARGO CD.\n\n"
+        "CERTIFICATIONS\n"
+        "- CERTIFIED KUBERNETES ADMINISTRATOR (CKA)\n"
+        "- AWS CERTIFIED SOLUTIONS ARCHITECT\n"
+    )
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+    parsed = await parse_resume_text(text)
+
+    assert parsed.profile.full_name == "ELENA ROSTOVA"
+    assert parsed.profile.email == "ELENA.ROSTOVA@TECHCORP.IO"
+    assert "SENIOR DEVOPS AND PLATFORM SPECIALIST" in parsed.profile.summary
+    assert "PROFESSIONAL SUMMARY" not in parsed.profile.summary
+    assert len(parsed.evidence.skills) >= 4
+    assert len(parsed.evidence.experience) >= 1
+    assert len(parsed.evidence.certifications) >= 2
+    assert parsed.evidence.projects == []
+    assert parsed.evidence.education == []
+
+
+@pytest.mark.asyncio
+async def test_fixture_4_different_section_order(monkeypatch):
+    """Fixture 4: Different section order (Skills -> Education -> Projects -> Experience)."""
+    text = (
+        "Marcus Aurelius Vance\n"
+        "marcus.vance@polytech.edu | +1-415-555-8822\n\n"
+        "TECHNICAL SKILLS\n"
+        "Languages: Rust, C++, Python, TypeScript\n"
+        "Systems: Linux, WebAssembly, LLVM\n\n"
+        "EDUCATION\n"
+        "Carnegie Mellon University\n"
+        "Bachelor of Science in Electrical and Computer Engineering\n\n"
+        "FEATURED PROJECTS\n"
+        "FastWasm Engine\n"
+        "Creator & Maintainer\n"
+        "- Implemented JIT compiler for WebAssembly binaries in Rust.\n"
+        "- Benchmarked 2.4x speedup over standard interpreter runtime.\n\n"
+        "WORK EXPERIENCE\n"
+        "Vector Systems\n"
+        "Systems Software Engineer\n"
+        "- Developed low-latency IPC message bus for autonomous vehicles.\n"
+    )
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+    parsed = await parse_resume_text(text)
+
+    assert parsed.profile.full_name == "Marcus Aurelius Vance"
+    assert len(parsed.evidence.skills) >= 4
+    assert len(parsed.evidence.education) >= 1
+    assert len(parsed.evidence.projects) >= 1
+    assert parsed.evidence.projects[0].title == "FastWasm Engine"
+    assert len(parsed.evidence.experience) >= 1
+    # Summary was not provided in this resume, stays cleanly empty
+    assert parsed.profile.summary == ""
+    assert parsed.evidence.summary == ""
+
+
+@pytest.mark.asyncio
+async def test_fixture_5_missing_sections(monkeypatch):
+    """Fixture 5: Minimal resume with missing summary, missing projects, and missing certifications."""
+    text = (
+        "Alice Montgomery\n"
+        "alice.m@startup.co | +1-650-555-0143\n\n"
+        "WORK EXPERIENCE\n"
+        "Startup Labs\n"
+        "Backend Developer\n"
+        "- Designed GraphQL APIs with Node.js and PostgreSQL.\n\n"
+        "EDUCATION\n"
+        "Georgia Institute of Technology\n"
+        "B.S. in Computer Science\n"
+    )
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+    parsed = await parse_resume_text(text)
+
+    assert parsed.profile.full_name == "Alice Montgomery"
+    assert parsed.profile.email == "alice.m@startup.co"
+    # Undetected sections stay completely empty, never a raw dump of text
+    assert parsed.profile.summary == ""
+    assert parsed.evidence.summary == ""
+    assert parsed.evidence.skills == []
+    assert parsed.evidence.projects == []
+    assert parsed.evidence.certifications == []
+    assert len(parsed.evidence.experience) == 1
+    assert len(parsed.evidence.education) == 1
+
+
+@pytest.mark.asyncio
+async def test_fixture_6_inline_contact_info(monkeypatch):
+    """Fixture 6: Candidate name and all contact links formatted in a single inline delimiter row."""
+    text = (
+        "Jonathan Hayes | jonathan.hayes@domain.com | (212) 555-0188 | github.com/jhayes | linkedin.com/in/jonathanhayes\n"
+        "Principal Machine Learning Architect\n\n"
+        "SUMMARY\n"
+        "Principal AI/ML Architect leading enterprise LLM deployment, fine-tuning, and retrieval-augmented generation (RAG) pipelines at scale.\n\n"
+        "TECHNICAL SKILLS\n"
+        "PyTorch, LangChain, Transformers, TensorRT, Triton Inference Server, CUDA, Python\n\n"
+        "WORK EXPERIENCE\n"
+        "Cognitive AI Research\n"
+        "Principal AI Architect\n"
+        "- Deployed 70B parameter models with sub-50ms latency using speculative decoding.\n"
+    )
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+    parsed = await parse_resume_text(text)
+
+    assert parsed.profile.full_name == "Jonathan Hayes"
+    assert parsed.profile.email == "jonathan.hayes@domain.com"
+    assert "555-0188" in parsed.profile.phone or "5550188" in parsed.profile.phone
+    assert parsed.profile.github == "https://github.com/jhayes"
+    assert parsed.profile.linkedin == "https://linkedin.com/in/jonathanhayes"
+    assert "Principal AI/ML Architect leading enterprise LLM deployment" in parsed.profile.summary
+    assert "Jonathan Hayes" not in parsed.profile.summary
+    assert "SUMMARY" not in parsed.profile.summary
+    assert len(parsed.evidence.skills) >= 4
+    assert len(parsed.evidence.experience) >= 1
+    assert parsed.evidence.education == []
+    assert parsed.evidence.certifications == []
+
+
