@@ -586,7 +586,7 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
   }) as ResumeItem;
 
 export function CareerProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   const [profile, setProfile] = useState<ProfileData>(() => {
     if (typeof window !== "undefined" && (window as any).__E2E_MOCK_PROFILE__) {
@@ -667,6 +667,10 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
   // Set up real-time Firestore listeners scoped strictly to user.uid
   useEffect(() => {
+    if (authLoading) {
+      setIsLoaded(false);
+      return;
+    }
     const uid = user?.uid;
     // Reset load state on account change so a new user never briefly sees
     // the previous user's data as "loaded".
@@ -921,7 +925,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       unsubResumes();
       unsubActions();
     };
-  }, [user?.uid, retryTrigger]);
+  }, [user?.uid, authLoading, retryTrigger]);
 
 
   // Profile persistence via backend API proxy
