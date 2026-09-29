@@ -588,12 +588,42 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
 export function CareerProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
 
-  const [profile, setProfile] = useState<ProfileData>(defaultEmptyProfile);
-  const [education, setEducation] = useState<EducationData[]>([]);
-  const [skills, setSkills] = useState<SkillData[]>([]);
-  const [projects, setProjects] = useState<ProjectData[]>([]);
-  const [experience, setExperience] = useState<ExperienceData[]>([]);
-  const [certifications, setCertifications] = useState<CertificationData[]>([]);
+  const [profile, setProfile] = useState<ProfileData>(() => {
+    if (typeof window !== "undefined" && (window as any).__E2E_MOCK_PROFILE__) {
+      return (window as any).__E2E_MOCK_PROFILE__;
+    }
+    return defaultEmptyProfile;
+  });
+  const [education, setEducation] = useState<EducationData[]>(() => {
+    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_EDUCATION__)) {
+      return (window as any).__E2E_MOCK_EDUCATION__;
+    }
+    return [];
+  });
+  const [skills, setSkills] = useState<SkillData[]>(() => {
+    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_SKILLS__)) {
+      return (window as any).__E2E_MOCK_SKILLS__;
+    }
+    return [];
+  });
+  const [projects, setProjects] = useState<ProjectData[]>(() => {
+    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_PROJECTS__)) {
+      return (window as any).__E2E_MOCK_PROJECTS__;
+    }
+    return [];
+  });
+  const [experience, setExperience] = useState<ExperienceData[]>(() => {
+    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__)) {
+      return (window as any).__E2E_MOCK_EXPERIENCE__;
+    }
+    return [];
+  });
+  const [certifications, setCertifications] = useState<CertificationData[]>(() => {
+    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__)) {
+      return (window as any).__E2E_MOCK_CERTIFICATIONS__;
+    }
+    return [];
+  });
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
   const [resumes, setResumes] = useState<ResumeItem[]>(() => {
@@ -644,12 +674,21 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     setWorkspaceLoadErrors([]);
     setWorkspaceRevision(0);
     if (!uid) {
-      setProfile(defaultEmptyProfile);
-      setEducation([]);
-      setSkills([]);
-      setProjects([]);
-      setExperience([]);
-      setCertifications([]);
+      if (typeof window !== "undefined" && (window as any).__E2E_MOCK_PROFILE__) {
+        setProfile((window as any).__E2E_MOCK_PROFILE__);
+        setEducation(Array.isArray((window as any).__E2E_MOCK_EDUCATION__) ? (window as any).__E2E_MOCK_EDUCATION__ : []);
+        setSkills(Array.isArray((window as any).__E2E_MOCK_SKILLS__) ? (window as any).__E2E_MOCK_SKILLS__ : []);
+        setProjects(Array.isArray((window as any).__E2E_MOCK_PROJECTS__) ? (window as any).__E2E_MOCK_PROJECTS__ : []);
+        setExperience(Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__) ? (window as any).__E2E_MOCK_EXPERIENCE__ : []);
+        setCertifications(Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__) ? (window as any).__E2E_MOCK_CERTIFICATIONS__ : []);
+      } else {
+        setProfile(defaultEmptyProfile);
+        setEducation([]);
+        setSkills([]);
+        setProjects([]);
+        setExperience([]);
+        setCertifications([]);
+      }
       setAchievements([]);
       setDocuments([]);
       if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
