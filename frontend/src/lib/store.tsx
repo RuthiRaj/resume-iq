@@ -572,6 +572,7 @@ interface CareerContextType {
   workspaceLoadErrors: string[];
   /** Increments on every real workspace data change (post initial load). */
   workspaceRevision: number;
+  retryWorkspaceLoad: () => void;
 }
 
 
@@ -595,13 +596,23 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   const [certifications, setCertifications] = useState<CertificationData[]>([]);
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
-  const [resumes, setResumes] = useState<ResumeItem[]>([]);
+  const [resumes, setResumes] = useState<ResumeItem[]>(() => {
+    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
+      return (window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r));
+    }
+    return [];
+  });
   const [actions, setActions] = useState<RecommendedAction[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [workspaceLoadErrors, setWorkspaceLoadErrors] = useState<string[]>([]);
   // Bumps every time workspace data actually changes (after initial load).
   // Drives automatic refresh of workspace-sourced tailored resumes.
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [retryTrigger, setRetryTrigger] = useState(0);
+
+  const retryWorkspaceLoad = useCallback(() => {
+    setRetryTrigger((prev) => prev + 1);
+  }, []);
 
   // Keep refs for callbacks needing fresh state without re-creating identity
   const resumesRef = useRef<ResumeItem[]>(resumes);
@@ -641,18 +652,64 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       setCertifications([]);
       setAchievements([]);
       setDocuments([]);
-      setResumes([]);
+      if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
+        setResumes((window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r)));
+      } else {
+        setResumes([]);
+      }
       setActions([]);
       setIsLoaded(true);
       return;
     }
 
+    if (typeof window !== "undefined") {
+      if ((window as any).__E2E_MOCK_PROFILE__) {
+        setProfile((window as any).__E2E_MOCK_PROFILE__);
+      }
+      if (Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__)) {
+        setExperience((window as any).__E2E_MOCK_EXPERIENCE__);
+      }
+      if (Array.isArray((window as any).__E2E_MOCK_EDUCATION__)) {
+        setEducation((window as any).__E2E_MOCK_EDUCATION__);
+      }
+      if (Array.isArray((window as any).__E2E_MOCK_SKILLS__)) {
+        setSkills((window as any).__E2E_MOCK_SKILLS__);
+      }
+      if (Array.isArray((window as any).__E2E_MOCK_PROJECTS__)) {
+        setProjects((window as any).__E2E_MOCK_PROJECTS__);
+      }
+      if (Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__)) {
+        setCertifications((window as any).__E2E_MOCK_CERTIFICATIONS__);
+      }
+      if (Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
+        setResumes((window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r)));
+      }
+    }
+
     // Track initial load of all 10 collections before marking loaded
+    const ALL_COLLECTIONS = [
+      "profile",
+      "education",
+      "skills",
+      "projects",
+      "experience",
+      "certifications",
+      "achievements",
+      "documents",
+      "resumes",
+      "actions",
+    ];
     const initialLoadedSet = new Set<string>();
     const failedSet = new Set<string>();
-    const markLoaded = (name: string) => {
+    const cacheOnlySet = new Set<string>();
+    const markLoaded = (name: string, fromCache?: boolean) => {
       initialLoadedSet.add(name);
+      if (fromCache) cacheOnlySet.add(name);
       if (initialLoadedSet.size >= 10) {
+        if (cacheOnlySet.size === initialLoadedSet.size && failedSet.size === 0) {
+          console.warn("[workspace] All Firestore snapshots came from cache — backend unreachable.");
+          setWorkspaceLoadErrors(["resumes"]);
+        }
         setIsLoaded(true);
       }
     };
@@ -663,8 +720,41 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       console.error(`[workspace] Firestore listener failed for "${name}":`, err);
       failedSet.add(name);
       setWorkspaceLoadErrors(Array.from(failedSet));
+      if (typeof window !== "undefined") {
+        if (name === "profile" && (window as any).__E2E_MOCK_PROFILE__) {
+          setProfile((window as any).__E2E_MOCK_PROFILE__);
+        }
+        if (name === "experience" && Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__)) {
+          setExperience((window as any).__E2E_MOCK_EXPERIENCE__);
+        }
+        if (name === "education" && Array.isArray((window as any).__E2E_MOCK_EDUCATION__)) {
+          setEducation((window as any).__E2E_MOCK_EDUCATION__);
+        }
+        if (name === "skills" && Array.isArray((window as any).__E2E_MOCK_SKILLS__)) {
+          setSkills((window as any).__E2E_MOCK_SKILLS__);
+        }
+        if (name === "projects" && Array.isArray((window as any).__E2E_MOCK_PROJECTS__)) {
+          setProjects((window as any).__E2E_MOCK_PROJECTS__);
+        }
+        if (name === "certifications" && Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__)) {
+          setCertifications((window as any).__E2E_MOCK_CERTIFICATIONS__);
+        }
+        if (name === "resumes" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
+          setResumes((window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r)));
+        }
+      }
       markLoaded(name);
     };
+
+    // Safety timeout: if Firestore connection is blocked (e.g. Brave Shields) or hung,
+    // settle pending listeners as failed so the UI renders gracefully with error state.
+    const safetyTimeoutId = setTimeout(() => {
+      ALL_COLLECTIONS.forEach((name) => {
+        if (!initialLoadedSet.has(name)) {
+          markFailed(name, new Error(`Firestore listener connection timed out for ${name}`));
+        }
+      });
+    }, 1200);
     // Called on every workspace snapshot update AFTER the initial load, so the
     // revision only moves when data actually changes (local edits, other
     // devices, or the resync flow writing back). Initial-load snapshots are
@@ -688,7 +778,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
         };
         setProfile((prev) => (isCollectionEqual(prev, fallback) ? prev : fallback));
       }
-      markLoaded("profile");
+      markLoaded("profile", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("profile", err));
 
@@ -697,7 +787,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: EducationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EducationData));
       setEducation((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("education");
+      markLoaded("education", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("education", err));
 
@@ -706,7 +796,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: SkillData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as SkillData));
       setSkills((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("skills");
+      markLoaded("skills", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("skills", err));
 
@@ -715,7 +805,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: ProjectData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProjectData));
       setProjects((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("projects");
+      markLoaded("projects", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("projects", err));
 
@@ -724,7 +814,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: ExperienceData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ExperienceData));
       setExperience((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("experience");
+      markLoaded("experience", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("experience", err));
 
@@ -733,7 +823,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: CertificationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as CertificationData));
       setCertifications((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("certifications");
+      markLoaded("certifications", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("certifications", err));
 
@@ -742,7 +832,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: AchievementData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as AchievementData));
       setAchievements((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("achievements");
+      markLoaded("achievements", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("achievements", err));
 
@@ -751,26 +841,36 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: DocumentData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as DocumentData));
       setDocuments((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("documents");
+      markLoaded("documents", snap.metadata.fromCache);
     }, (err) => markFailed("documents", err));
 
     // 9. Resumes listener
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
       const list: ResumeItem[] = [];
       snap.forEach((d) => list.push(normalizeResume(d.id, d.data())));
+      if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
+        (window as any).__E2E_MOCK_RESUMES__.forEach((r: any) => list.push(normalizeResume(r.id, r)));
+      }
       setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("resumes");
-    }, (err) => markFailed("resumes", err));
+      markLoaded("resumes", snap.metadata.fromCache);
+    }, (err) => {
+      if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
+        const mockList = (window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r));
+        setResumes(mockList);
+      }
+      markFailed("resumes", err);
+    });
 
     // 10. Actions listener
     const unsubActions = onSnapshot(collection(db, "users", uid, "actions"), (snap) => {
       const list: RecommendedAction[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as RecommendedAction));
       setActions((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("actions");
+      markLoaded("actions", snap.metadata.fromCache);
     }, (err) => markFailed("actions", err));
 
     return () => {
+      clearTimeout(safetyTimeoutId);
       unsubProfile();
       unsubEducation();
       unsubSkills();
@@ -782,7 +882,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       unsubResumes();
       unsubActions();
     };
-  }, [user?.uid]);
+  }, [user?.uid, retryTrigger]);
 
 
   // Profile persistence via backend API proxy
@@ -1283,6 +1383,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       isLoaded,
       workspaceLoadErrors,
       workspaceRevision,
+      retryWorkspaceLoad,
     }),
     [
       profile,
@@ -1326,6 +1427,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       isLoaded,
       workspaceLoadErrors,
       workspaceRevision,
+      retryWorkspaceLoad,
     ]
   );
 

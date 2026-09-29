@@ -397,3 +397,83 @@ def test_unauthenticated_ingestion_requests():
 
     res_confirm = client.post("/api/v1/resumes/ingest/ingest_123/confirm", json={})
     assert res_confirm.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 5. Bug B Regression Tests: Summary Isolation & Section Preservation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_parse_resume_text_summary_isolation_regression(monkeypatch):
+    """
+    Regression test for Bug B:
+    Ensures that parsing extracted resume text isolates ONLY the summary paragraph in
+    profile.summary and evidence.summary, without name/contact headers or trailing section run-ons (like EDUCATION),
+    and ensures education, experience, projects, and skills are preserved and populated into their own fields.
+    """
+    sample_resume_text = (
+        "GOSULA RUTHI RAJ\n"
+        "+91 99514 35696 | gosularuthiraj31@gmail.com | github.com/Ruthiraj-Gosula | linkedin.com/in/gosula-ruthiraj\n"
+        "Software Development Engineer Intern Candidate\n\n"
+        "SUMMARY\n"
+        "Computer Science (AI & ML) undergraduate with hands-on full-stack project experience building and shipping React/TypeScript "
+        "applications with Firebase-backed data layers and REST API integrations. Comfortable working across frontend and backend, "
+        "debugging issues end-to-end, and picking up new tools quickly.\n\n"
+        "EDUCATION\n"
+        "CMR College of Engineering & Technology\n"
+        "B.Tech in Computer Science and Machine Learning\n\n"
+        "TECHNICAL SKILLS\n"
+        "Languages: Python, TypeScript, JavaScript, SQL\n"
+        "Frameworks: React, Next.js, FastAPI, Node.js\n"
+        "Tools: Git, Docker, Firebase, PostgreSQL\n\n"
+        "WORK EXPERIENCE\n"
+        "Apex Scale Technologies\n"
+        "Software Engineering Intern\n"
+        "- Built responsive UI components using Next.js and Tailwind CSS.\n"
+        "- Integrated REST API endpoints with FastAPI backend.\n\n"
+        "PROJECTS\n"
+        "ResumeIQ\n"
+        "Lead Developer\n"
+        "- Architected AI resume personalization platform with real-time ATS scoring.\n"
+        "- Implemented client-side ATS tokenization matrix.\n"
+    )
+
+    # Force fallback / deterministic parser path (no external LLM key needed)
+    monkeypatch.setattr("app.core.config.settings.GROQ_API_KEY", "")
+
+    parsed = await parse_resume_text(sample_resume_text)
+
+    # 1. Assert contact info correctly extracted
+    assert parsed.profile.full_name == "GOSULA RUTHI RAJ"
+    assert parsed.profile.email == "gosularuthiraj31@gmail.com"
+    assert "99514" in parsed.profile.phone
+    assert parsed.profile.github == "https://github.com/Ruthiraj-Gosula"
+    assert parsed.profile.linkedin == "https://linkedin.com/in/gosula-ruthiraj"
+
+    # 2. Assert Summary is strictly the summary paragraph
+    expected_summary_snippet = "Computer Science (AI & ML) undergraduate with hands-on full-stack project experience"
+    assert expected_summary_snippet in parsed.profile.summary
+    assert "GOSULA RUTHI RAJ" not in parsed.profile.summary
+    assert "gosularuthiraj31@gmail.com" not in parsed.profile.summary
+    assert "SUMMARY" not in parsed.profile.summary
+    assert "EDUCATION" not in parsed.profile.summary
+    assert parsed.evidence.summary == parsed.profile.summary
+
+    # 3. Assert other sections are preserved and populated into their own fields
+    assert len(parsed.evidence.education) >= 1
+    assert "CMR College of Engineering & Technology" in parsed.evidence.education[0].institution
+    assert "Computer Science" in parsed.evidence.education[0].field_of_study or "B.Tech" in parsed.evidence.education[0].degree
+
+    assert len(parsed.evidence.skills) >= 4
+    skill_names = [s.name for s in parsed.evidence.skills]
+    assert "Python" in skill_names
+    assert "TypeScript" in skill_names
+
+    assert len(parsed.evidence.experience) >= 1
+    assert "Apex Scale Technologies" in parsed.evidence.experience[0].company
+    assert len(parsed.evidence.experience[0].bullets) >= 2
+
+    assert len(parsed.evidence.projects) >= 1
+    assert "ResumeIQ" in parsed.evidence.projects[0].title
+    assert len(parsed.evidence.projects[0].highlights) >= 2
+

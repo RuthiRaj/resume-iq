@@ -94,16 +94,16 @@ function BuilderContent() {
 
   // Section level custom overrides
   const [customSummary, setCustomSummary] = useState(
-    existingResume?.sections.summary || profile.summary
+    existingResume?.sections?.summary || profile.summary || ""
   );
   const deferredCustomSummary = useDeferredValue(customSummary);
 
   // Selected entities included in this resume
   const [selectedExpIds, setSelectedExpIds] = useState<string[]>(
-    existingResume?.sections.experiences || experience.map((e) => e.id || "")
+    existingResume?.sections?.experiences || experience.map((e) => e.id || "")
   );
   const [selectedProjIds, setSelectedProjIds] = useState<string[]>(
-    existingResume?.sections.projects || projects.map((p) => p.id || "")
+    existingResume?.sections?.projects || projects.map((p) => p.id || "")
   );
 
   // AI regeneration status
@@ -145,6 +145,19 @@ function BuilderContent() {
       }
       setCustomSummary((prev) => prev || profile.summary);
       setTargetRole((prev) => (prev === "Software Engineer" && profile.targetRoles?.[0] ? profile.targetRoles[0] : prev));
+    } else {
+      setResumeTitle(existingResume.title || "Tailored Resume");
+      setTargetRole(existingResume.targetRole || (profile.targetRoles?.[0] || "Software Engineer"));
+      setTargetCompany(existingResume.targetCompany || "");
+      setJobDescription(existingResume.jobDescription || "");
+      if (existingResume.template) setActiveTemplate(existingResume.template);
+      setCustomSummary(existingResume.sections?.summary || profile.summary || "");
+      if (existingResume.sections?.experiences) {
+        setSelectedExpIds(existingResume.sections.experiences);
+      }
+      if (existingResume.sections?.projects) {
+        setSelectedProjIds(existingResume.sections.projects);
+      }
     }
   }, [experience, projects, profile.summary, profile.targetRoles, existingResume]);
 
@@ -368,9 +381,9 @@ function BuilderContent() {
 
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print:space-y-0 print:p-0 print:m-0 print:w-full">
       {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4 print:hidden no-print">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-h1 font-semibold text-primary">Resume Builder & Live Editor</h1>
@@ -411,13 +424,15 @@ function BuilderContent() {
       </div>
 
       {toast && (
-        <ToastBanner message={toast.message} type={toast.type} />
+        <div className="print:hidden no-print">
+          <ToastBanner message={toast.message} type={toast.type} />
+        </div>
       )}
 
-      {/* Main Split Layout: Editor Sidebar (Left) & Live Preview (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Main Split Layout: Editor Controls Sidebar (Left) & Live Preview (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 print:block print:w-full print:m-0 print:p-0">
         {/* Editor Controls Sidebar (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
+        <div className="lg:col-span-5 space-y-4 print:hidden no-print">
           {/* Metadata Card with Target Context */}
           <Card>
             <CardContent className="p-4 space-y-3">
@@ -779,9 +794,9 @@ function BuilderContent() {
           )}
         </div>
 
-        {/* Live Side-by-Side Preview (7 cols) */}
-        <div className="lg:col-span-7 space-y-3">
-          <div className="flex items-center justify-between text-caption font-semibold text-secondary">
+        {/* Live Side-by-Side Preview (7 cols on screen, full-width on print) */}
+        <div className="lg:col-span-7 space-y-3 print:col-span-12 print:w-full print:m-0 print:p-0 print:space-y-0 print:block">
+          <div className="flex items-center justify-between text-caption font-semibold text-secondary print:hidden no-print">
             <span>LIVE RESUME PREVIEW &bull; A4 SCALE</span>
             <div className="flex items-center gap-2">
               <span className="rounded bg-page border border-border px-2 py-0.5 text-[10px] uppercase font-mono">
@@ -791,7 +806,7 @@ function BuilderContent() {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-card border border-border bg-[#E4E7EC]/40 p-4">
+          <div className="overflow-x-auto rounded-card border border-border bg-[#E4E7EC]/40 p-4 print:border-none print:bg-white print:p-0 print:m-0 print:overflow-visible print:w-full resume-print-wrapper">
             <ResumeUniversalRenderer template={activeTemplate} data={resumeDataForRender} />
           </div>
         </div>
@@ -799,13 +814,14 @@ function BuilderContent() {
 
       {/* AI Generate Role Resume Modal */}
       {isGenerateModalOpen && (
-        <Modal
-          isOpen={true}
-          onClose={() => setIsGenerateModalOpen(false)}
-          title="AI Generate Role-Targeted Resume"
-          description="Ranks your workspace career evidence and tailors bullets and executive summary with strict anti-hallucination verification."
-          maxWidth="lg"
-        >
+        <div className="print:hidden no-print">
+          <Modal
+            isOpen={true}
+            onClose={() => setIsGenerateModalOpen(false)}
+            title="AI Generate Role-Targeted Resume"
+            description="Ranks your workspace career evidence and tailors bullets and executive summary with strict anti-hallucination verification."
+            maxWidth="lg"
+          >
           <div className="space-y-4">
             {generateError && <ErrorAlert message={generateError} />}
 
@@ -875,6 +891,7 @@ function BuilderContent() {
             </div>
           </div>
         </Modal>
+        </div>
       )}
     </div>
   );
