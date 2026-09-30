@@ -585,6 +585,17 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
     tags: Array.isArray(data.tags) ? data.tags : [],
   }) as ResumeItem;
 
+const getE2EMockResumes = (): ResumeItem[] | null => {
+  if (
+    typeof window === "undefined" ||
+    window.localStorage.getItem("e2e_bypass_auth") !== "true" ||
+    !Array.isArray((window as any).__E2E_MOCK_RESUMES__)
+  ) {
+    return null;
+  }
+  return (window as any).__E2E_MOCK_RESUMES__.map((resume: ResumeItem) => normalizeResume(resume.id, resume));
+};
+
 export function CareerProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
 
@@ -626,12 +637,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   });
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
-  const [resumes, setResumes] = useState<ResumeItem[]>(() => {
-    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
-      return (window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r));
-    }
-    return [];
-  });
+  const [resumes, setResumes] = useState<ResumeItem[]>(() => getE2EMockResumes() || []);
   const [actions, setActions] = useState<RecommendedAction[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [workspaceLoadErrors, setWorkspaceLoadErrors] = useState<string[]>([]);
@@ -695,11 +701,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       }
       setAchievements([]);
       setDocuments([]);
-      if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
-        setResumes((window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r)));
-      } else {
-        setResumes([]);
-      }
+      setResumes(getE2EMockResumes() || []);
       setActions([]);
       setIsLoaded(true);
       return;
@@ -891,16 +893,12 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
       const list: ResumeItem[] = [];
       snap.forEach((d) => list.push(normalizeResume(d.id, d.data())));
-      if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
-        (window as any).__E2E_MOCK_RESUMES__.forEach((r: any) => list.push(normalizeResume(r.id, r)));
-      }
+      list.push(...(getE2EMockResumes() || []));
       setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
       markLoaded("resumes", snap.metadata.fromCache);
     }, (err) => {
-      if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
-        const mockList = (window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r));
-        setResumes(mockList);
-      }
+      const mockResumes = getE2EMockResumes();
+      if (mockResumes) setResumes(mockResumes);
       markFailed("resumes", err);
     });
 
