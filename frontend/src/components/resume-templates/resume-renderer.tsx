@@ -17,6 +17,23 @@ export interface ResumeData {
 }
 
 /**
+ * Empty profile fallback (PR1-M4). resolveResumeData must never return an
+ * undefined profile: templates dereference profile.fullName etc. directly.
+ */
+export const emptyResumeProfile: ProfileData = {
+  fullName: "",
+  headline: "",
+  email: "",
+  phone: "",
+  location: "",
+  website: "",
+  linkedin: "",
+  github: "",
+  summary: "",
+  targetRoles: [],
+} as ProfileData;
+
+/**
  * Resolves the renderable resume data.
  * If an immutable snapshot exists on the resume, it renders from the snapshot.
  * Otherwise, it falls back to resolving entities from live Career Profile data (legacy compatibility).
@@ -35,7 +52,7 @@ export function resolveResumeData(
   // 1. Immutable snapshot path (Preferred point-in-time state)
   if (resume.snapshot) {
     return {
-      profile: resume.snapshot.profile || (liveData?.profile as ProfileData),
+      profile: resume.snapshot.profile || liveData?.profile || emptyResumeProfile,
       education: resume.snapshot.education || [],
       skills: resume.snapshot.skills || [],
       projects: resume.snapshot.projects || [],
@@ -67,18 +84,7 @@ export function resolveResumeData(
 
   // Safe fallback if liveData not provided and snapshot missing
   return {
-    profile: {
-      fullName: "",
-      headline: "",
-      email: "",
-      phone: "",
-      location: "",
-      website: "",
-      linkedin: "",
-      github: "",
-      summary: "",
-      targetRoles: [],
-    },
+    profile: { ...emptyResumeProfile },
     education: [],
     skills: [],
     projects: [],

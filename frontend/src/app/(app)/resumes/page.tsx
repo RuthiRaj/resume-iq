@@ -42,10 +42,20 @@ export default function ResumesPage() {
   const [renameTitle, setRenameTitle] = useState("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // PR1-M5: track the toast timer so rapid toasts reset it and unmount clears it.
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   };
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Create Targeted Variant Modal State
   const [isCreateVariantOpen, setIsCreateVariantOpen] = useState(false);
@@ -64,12 +74,14 @@ export default function ResumesPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  const filtered = resumes.filter(
-    (r) =>
-      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.targetRole.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (r.targetCompany && r.targetCompany.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filtered = resumes.filter((r) => {
+    const query = (searchQuery ?? "").toLowerCase();
+    return (
+      (r.title ?? "").toLowerCase().includes(query) ||
+      (r.targetRole ?? "").toLowerCase().includes(query) ||
+      (r.targetCompany ?? "").toLowerCase().includes(query)
+    );
+  });
 
   const handleOpenRename = (r: ResumeItem) => {
     setRenameItem(r);

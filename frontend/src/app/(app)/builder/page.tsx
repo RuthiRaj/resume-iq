@@ -56,22 +56,19 @@ function BuilderContent() {
   // Active working resume
   const existingResume = resumes.find((r) => r.id === resumeIdParam);
 
+  // PR1-M5: initialize to safe defaults only. existingResume is undefined on
+  // first render (resumes load async); the sync effect below populates state
+  // when it arrives (resumeChanged) instead of freezing a stale snapshot.
   const [activeTemplate, setActiveTemplate] = useState<"modern" | "minimal" | "professional" | "ats">(
-    existingResume ? existingResume.template : "modern"
+    "modern"
   );
-  const [resumeTitle, setResumeTitle] = useState(
-    existingResume ? existingResume.title : "Tailored Resume"
-  );
+  const [resumeTitle, setResumeTitle] = useState("Tailored Resume");
   const [targetRole, setTargetRole] = useState(
-    existingResume ? existingResume.targetRole : (profile.targetRoles?.[0] || "Software Engineer")
+    profile.targetRoles?.[0] || "Software Engineer"
   );
-  const [targetCompany, setTargetCompany] = useState(
-    existingResume ? (existingResume.targetCompany || "") : ""
-  );
-  const [jobDescription, setJobDescription] = useState<string>(
-    existingResume?.jobDescription || ""
-  );
-  const [showJdPanel, setShowJdPanel] = useState(Boolean(existingResume?.jobDescription));
+  const [targetCompany, setTargetCompany] = useState("");
+  const [jobDescription, setJobDescription] = useState<string>("");
+  const [showJdPanel, setShowJdPanel] = useState(false);
 
   // Current fit / ATS score from resume
   const currentFitScore = existingResume?.currentScore ?? existingResume?.atsScore ?? existingResume?.score ?? null;
@@ -93,27 +90,36 @@ function BuilderContent() {
   }, [jobDescription, skills, existingResume?.analysisResults]);
 
   // Section level custom overrides
-  const [customSummary, setCustomSummary] = useState(
-    existingResume?.sections?.summary || profile.summary || ""
-  );
+  // PR1-M5: default only; synced from existingResume by the effect below.
+  const [customSummary, setCustomSummary] = useState(profile.summary || "");
   const deferredCustomSummary = useDeferredValue(customSummary);
 
   // Selected entities included in this resume
   const [selectedExpIds, setSelectedExpIds] = useState<string[]>(
-    existingResume?.sections?.experiences || experience.map((e) => e.id || "")
+    experience.map((e) => e.id || "")
   );
   const [selectedProjIds, setSelectedProjIds] = useState<string[]>(
-    existingResume?.sections?.projects || projects.map((p) => p.id || "")
+    projects.map((p) => p.id || "")
   );
 
   // AI regeneration status
   const [isRegeneratingSection, setIsRegeneratingSection] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // PR1-M5: track the toast timer so rapid toasts reset it and unmount clears it.
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   };
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // AI Role Generate Modal State
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
