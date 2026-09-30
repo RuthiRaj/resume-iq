@@ -308,7 +308,59 @@ function BuilderContent() {
     }
   };
 
-  const handlePrint = () => {
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+
+  const handlePrint = async () => {
+    if (!user) {
+      showToast("Authentication required to export resume PDF", "error");
+      return;
+    }
+
+    setIsExportingPdf(true);
+    try {
+      const idToken = await user.getIdToken();
+      // Server-side PDF export requires a saved resume variant. For unsaved
+      // workspace previews there is no variant on the backend, so skip the
+      // export endpoint entirely (never send a placeholder ID) and use
+      // browser print instead.
+      if (!existingResume?.id) {
+        showToast("Save your resume first for server PDF export. Using browser print.", "info");
+        window.print();
+        return;
+      }
+      const variantId = existingResume.id;
+      const targetUrl = `/api/variants/${variantId}/export/pdf?template=${encodeURIComponent(activeTemplate)}`;
+
+      const res = await fetch(targetUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${idToken}`,
+        },
+      });
+
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${resumeTitle.replace(/[^a-zA-Z0-9_-]/g, "_") || "resume"}_${activeTemplate}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast("PDF exported successfully", "success");
+        return;
+      }
+
+      showToast("Server PDF export failed. Falling back to browser print.", "error");
+    } catch (err) {
+      console.warn("Server PDF export failed, falling back to browser print:", err);
+      showToast("Server PDF export failed. Falling back to browser print.", "error");
+    } finally {
+      setIsExportingPdf(false);
+    }
+
+    // Fallback to browser print preview with isolated print styles
     window.print();
   };
 
@@ -411,7 +463,7 @@ function BuilderContent() {
             <span>AI Generate Role Resume</span>
           </Button>
 
-          <Button onClick={handlePrint} variant="outline" size="sm" className="gap-1.5">
+          <Button onClick={handlePrint} variant="outline" size="sm" className="gap-1.5" disabled={isExportingPdf}>
             <Printer className="h-3.5 w-3.5" />
             <span>Print / Export PDF</span>
           </Button>
