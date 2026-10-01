@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState, ErrorAlert, ToastBanner } from "@/components/common/state-views";
+import { EmptyState, ErrorAlert, LoadingState, ToastBanner } from "@/components/common/state-views";
+import { filterResumes } from "@/lib/resume-filter";
 import { formatDate } from "@/lib/utils";
 import {
   FileText,
@@ -33,7 +34,15 @@ import {
 
 export default function ResumesPage() {
   const router = useRouter();
-  const { resumes, duplicateResume, deleteResume, updateResume } = useCareer();
+  const {
+    resumes,
+    duplicateResume,
+    deleteResume,
+    updateResume,
+    isLoaded,
+    workspaceLoadErrors,
+    retryWorkspaceLoad,
+  } = useCareer();
   const { user } = useAuth();
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -42,10 +51,20 @@ export default function ResumesPage() {
   const [renameTitle, setRenameTitle] = useState("");
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // PR1-M5: track the toast timer so rapid toasts reset it and unmount clears it.
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   };
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // Create Targeted Variant Modal State
   const [isCreateVariantOpen, setIsCreateVariantOpen] = useState(false);
@@ -64,12 +83,7 @@ export default function ResumesPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  const filtered = resumes.filter(
-    (r) =>
-      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.targetRole.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (r.targetCompany && r.targetCompany.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filtered = filterResumes(resumes, searchQuery);
 
   const handleOpenRename = (r: ResumeItem) => {
     setRenameItem(r);
@@ -300,7 +314,15 @@ export default function ResumesPage() {
       </div>
 
       {/* Content */}
-      {filtered.length === 0 ? (
+      {!isLoaded ? (
+        <LoadingState text="Loading your resumes..." />
+      ) : workspaceLoadErrors.includes("resumes") || workspaceLoadErrors.length > 0 ? (
+        <ErrorAlert
+          title="Failed to load resumes"
+          message="Could not load your saved resumes from the cloud database. Check your network or shield settings."
+          onRetry={retryWorkspaceLoad}
+        />
+      ) : filtered.length === 0 ? (
         <EmptyState
           title="No resumes found"
           description="Create your first tailored resume using our AI Builder or adjust your search filter."

@@ -585,7 +585,32 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
     tags: Array.isArray(data.tags) ? data.tags : [],
   }) as ResumeItem;
 
+/**
+ * Build-time gate for E2E test mocks (PR1-C1).
+ * NEXT_PUBLIC_* values are inlined at `next build` time, so in a production
+ * build made WITHOUT the flag this whole branch compiles to `false` and
+ * mock data can never activate — even if a user sets localStorage keys
+ * or injects `window.__E2E_MOCK_*` from the console.
+ */
+export const isE2EMockEnabled = (): boolean =>
+  process.env.NEXT_PUBLIC_E2E === "true" ||
+  process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true";
+
+const readE2EMockArray = (key: string): any[] | null => {
+  if (!isE2EMockEnabled()) return null;
+  if (typeof window === "undefined") return null;
+  const value = (window as any)[key];
+  return Array.isArray(value) ? value : null;
+};
+
+const readE2EMockProfile = (): any | null => {
+  if (!isE2EMockEnabled()) return null;
+  if (typeof window === "undefined") return null;
+  return (window as any).__E2E_MOCK_PROFILE__ ?? null;
+};
+
 const getE2EMockResumes = (): ResumeItem[] | null => {
+  if (!isE2EMockEnabled()) return null;
   if (
     typeof window === "undefined" ||
     window.localStorage.getItem("e2e_bypass_auth") !== "true" ||
@@ -600,40 +625,22 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
 
   const [profile, setProfile] = useState<ProfileData>(() => {
-    if (typeof window !== "undefined" && (window as any).__E2E_MOCK_PROFILE__) {
-      return (window as any).__E2E_MOCK_PROFILE__;
-    }
-    return defaultEmptyProfile;
+    return readE2EMockProfile() ?? defaultEmptyProfile;
   });
   const [education, setEducation] = useState<EducationData[]>(() => {
-    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_EDUCATION__)) {
-      return (window as any).__E2E_MOCK_EDUCATION__;
-    }
-    return [];
+    return readE2EMockArray("__E2E_MOCK_EDUCATION__") ?? [];
   });
   const [skills, setSkills] = useState<SkillData[]>(() => {
-    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_SKILLS__)) {
-      return (window as any).__E2E_MOCK_SKILLS__;
-    }
-    return [];
+    return readE2EMockArray("__E2E_MOCK_SKILLS__") ?? [];
   });
   const [projects, setProjects] = useState<ProjectData[]>(() => {
-    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_PROJECTS__)) {
-      return (window as any).__E2E_MOCK_PROJECTS__;
-    }
-    return [];
+    return readE2EMockArray("__E2E_MOCK_PROJECTS__") ?? [];
   });
   const [experience, setExperience] = useState<ExperienceData[]>(() => {
-    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__)) {
-      return (window as any).__E2E_MOCK_EXPERIENCE__;
-    }
-    return [];
+    return readE2EMockArray("__E2E_MOCK_EXPERIENCE__") ?? [];
   });
   const [certifications, setCertifications] = useState<CertificationData[]>(() => {
-    if (typeof window !== "undefined" && Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__)) {
-      return (window as any).__E2E_MOCK_CERTIFICATIONS__;
-    }
-    return [];
+    return readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__") ?? [];
   });
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
@@ -684,13 +691,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     setWorkspaceLoadErrors([]);
     setWorkspaceRevision(0);
     if (!uid) {
-      if (typeof window !== "undefined" && (window as any).__E2E_MOCK_PROFILE__) {
-        setProfile((window as any).__E2E_MOCK_PROFILE__);
-        setEducation(Array.isArray((window as any).__E2E_MOCK_EDUCATION__) ? (window as any).__E2E_MOCK_EDUCATION__ : []);
-        setSkills(Array.isArray((window as any).__E2E_MOCK_SKILLS__) ? (window as any).__E2E_MOCK_SKILLS__ : []);
-        setProjects(Array.isArray((window as any).__E2E_MOCK_PROJECTS__) ? (window as any).__E2E_MOCK_PROJECTS__ : []);
-        setExperience(Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__) ? (window as any).__E2E_MOCK_EXPERIENCE__ : []);
-        setCertifications(Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__) ? (window as any).__E2E_MOCK_CERTIFICATIONS__ : []);
+      const mockProfile = readE2EMockProfile();
+      if (mockProfile) {
+        setProfile(mockProfile);
+        setEducation(readE2EMockArray("__E2E_MOCK_EDUCATION__") ?? []);
+        setSkills(readE2EMockArray("__E2E_MOCK_SKILLS__") ?? []);
+        setProjects(readE2EMockArray("__E2E_MOCK_PROJECTS__") ?? []);
+        setExperience(readE2EMockArray("__E2E_MOCK_EXPERIENCE__") ?? []);
+        setCertifications(readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__") ?? []);
       } else {
         setProfile(defaultEmptyProfile);
         setEducation([]);
@@ -707,27 +715,34 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (typeof window !== "undefined") {
-      if ((window as any).__E2E_MOCK_PROFILE__) {
-        setProfile((window as any).__E2E_MOCK_PROFILE__);
+    if (isE2EMockEnabled() && typeof window !== "undefined") {
+      const mockProfile = readE2EMockProfile();
+      if (mockProfile) {
+        setProfile(mockProfile);
       }
-      if (Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__)) {
-        setExperience((window as any).__E2E_MOCK_EXPERIENCE__);
+      const mockExperience = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+      if (mockExperience) {
+        setExperience(mockExperience);
       }
-      if (Array.isArray((window as any).__E2E_MOCK_EDUCATION__)) {
-        setEducation((window as any).__E2E_MOCK_EDUCATION__);
+      const mockEducation = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+      if (mockEducation) {
+        setEducation(mockEducation);
       }
-      if (Array.isArray((window as any).__E2E_MOCK_SKILLS__)) {
-        setSkills((window as any).__E2E_MOCK_SKILLS__);
+      const mockSkills = readE2EMockArray("__E2E_MOCK_SKILLS__");
+      if (mockSkills) {
+        setSkills(mockSkills);
       }
-      if (Array.isArray((window as any).__E2E_MOCK_PROJECTS__)) {
-        setProjects((window as any).__E2E_MOCK_PROJECTS__);
+      const mockProjects = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+      if (mockProjects) {
+        setProjects(mockProjects);
       }
-      if (Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__)) {
-        setCertifications((window as any).__E2E_MOCK_CERTIFICATIONS__);
+      const mockCerts = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+      if (mockCerts) {
+        setCertifications(mockCerts);
       }
-      if (Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
-        setResumes((window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r)));
+      const mockResumesPrefill = getE2EMockResumes();
+      if (mockResumesPrefill) {
+        setResumes(mockResumesPrefill);
       }
     }
 
@@ -765,27 +780,34 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       console.error(`[workspace] Firestore listener failed for "${name}":`, err);
       failedSet.add(name);
       setWorkspaceLoadErrors(Array.from(failedSet));
-      if (typeof window !== "undefined") {
-        if (name === "profile" && (window as any).__E2E_MOCK_PROFILE__) {
-          setProfile((window as any).__E2E_MOCK_PROFILE__);
+      if (isE2EMockEnabled() && typeof window !== "undefined") {
+        if (name === "profile") {
+          const mockProfile = readE2EMockProfile();
+          if (mockProfile) setProfile(mockProfile);
         }
-        if (name === "experience" && Array.isArray((window as any).__E2E_MOCK_EXPERIENCE__)) {
-          setExperience((window as any).__E2E_MOCK_EXPERIENCE__);
+        if (name === "experience") {
+          const mockExperience = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+          if (mockExperience) setExperience(mockExperience);
         }
-        if (name === "education" && Array.isArray((window as any).__E2E_MOCK_EDUCATION__)) {
-          setEducation((window as any).__E2E_MOCK_EDUCATION__);
+        if (name === "education") {
+          const mockEducation = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+          if (mockEducation) setEducation(mockEducation);
         }
-        if (name === "skills" && Array.isArray((window as any).__E2E_MOCK_SKILLS__)) {
-          setSkills((window as any).__E2E_MOCK_SKILLS__);
+        if (name === "skills") {
+          const mockSkills = readE2EMockArray("__E2E_MOCK_SKILLS__");
+          if (mockSkills) setSkills(mockSkills);
         }
-        if (name === "projects" && Array.isArray((window as any).__E2E_MOCK_PROJECTS__)) {
-          setProjects((window as any).__E2E_MOCK_PROJECTS__);
+        if (name === "projects") {
+          const mockProjects = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+          if (mockProjects) setProjects(mockProjects);
         }
-        if (name === "certifications" && Array.isArray((window as any).__E2E_MOCK_CERTIFICATIONS__)) {
-          setCertifications((window as any).__E2E_MOCK_CERTIFICATIONS__);
+        if (name === "certifications") {
+          const mockCerts = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+          if (mockCerts) setCertifications(mockCerts);
         }
-        if (name === "resumes" && Array.isArray((window as any).__E2E_MOCK_RESUMES__)) {
-          setResumes((window as any).__E2E_MOCK_RESUMES__.map((r: any) => normalizeResume(r.id, r)));
+        if (name === "resumes") {
+          const mockResumes = getE2EMockResumes();
+          if (mockResumes) setResumes(mockResumes);
         }
       }
       markLoaded(name);
@@ -812,6 +834,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 1. Profile listener
     const unsubProfile = onSnapshot(doc(db, "users", uid, "profile", "main"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mockProfile = readE2EMockProfile();
+        if (mockProfile) {
+          setProfile((prev) => (isCollectionEqual(prev, mockProfile) ? prev : mockProfile));
+          markLoaded("profile", snap.metadata.fromCache);
+          return;
+        }
+      }
       if (snap.exists()) {
         const data = snap.data() as ProfileData;
         setProfile((prev) => (isCollectionEqual(prev, data) ? prev : data));
@@ -829,6 +859,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 2. Education listener
     const unsubEducation = onSnapshot(collection(db, "users", uid, "education"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+        if (mock) {
+          setEducation((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("education", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: EducationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EducationData));
       setEducation((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -838,6 +876,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 3. Skills listener
     const unsubSkills = onSnapshot(collection(db, "users", uid, "skills"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_SKILLS__");
+        if (mock) {
+          setSkills((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("skills", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: SkillData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as SkillData));
       setSkills((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -847,6 +893,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 4. Projects listener
     const unsubProjects = onSnapshot(collection(db, "users", uid, "projects"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+        if (mock) {
+          setProjects((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("projects", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: ProjectData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProjectData));
       setProjects((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -856,6 +910,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 5. Experience listener
     const unsubExperience = onSnapshot(collection(db, "users", uid, "experience"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+        if (mock) {
+          setExperience((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("experience", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: ExperienceData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ExperienceData));
       setExperience((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -865,6 +927,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 6. Certifications listener
     const unsubCertifications = onSnapshot(collection(db, "users", uid, "certifications"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+        if (mock) {
+          setCertifications((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("certifications", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: CertificationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as CertificationData));
       setCertifications((prev) => (isCollectionEqual(prev, list) ? prev : list));
