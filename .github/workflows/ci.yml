@@ -2,19 +2,19 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, consolidation ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, consolidation ]
 
 permissions:
-  contents: write
-  statuses: write
-  pull-requests: write
+  contents: read
 
 jobs:
   backend-test:
     name: Backend Tests & Lint
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -105,6 +105,12 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
           NODE_ENV: production
         run: npm run build
+
+      - name: Guard - no E2E mocks in production bundle
+        run: |
+          if grep -r "__E2E_MOCK" frontend/.next/static; then
+            echo "E2E mock code found in production bundle"; exit 1
+          fi
 
   docker-build-check:
     name: Docker OCI Multi-Stage Build Verification
