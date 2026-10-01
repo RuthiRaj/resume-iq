@@ -834,6 +834,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 1. Profile listener
     const unsubProfile = onSnapshot(doc(db, "users", uid, "profile", "main"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mockProfile = readE2EMockProfile();
+        if (mockProfile) {
+          setProfile((prev) => (isCollectionEqual(prev, mockProfile) ? prev : mockProfile));
+          markLoaded("profile", snap.metadata.fromCache);
+          return;
+        }
+      }
       if (snap.exists()) {
         const data = snap.data() as ProfileData;
         setProfile((prev) => (isCollectionEqual(prev, data) ? prev : data));
@@ -851,6 +859,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 2. Education listener
     const unsubEducation = onSnapshot(collection(db, "users", uid, "education"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+        if (mock) {
+          setEducation((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("education", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: EducationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EducationData));
       setEducation((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -860,6 +876,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 3. Skills listener
     const unsubSkills = onSnapshot(collection(db, "users", uid, "skills"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_SKILLS__");
+        if (mock) {
+          setSkills((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("skills", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: SkillData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as SkillData));
       setSkills((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -869,6 +893,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 4. Projects listener
     const unsubProjects = onSnapshot(collection(db, "users", uid, "projects"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+        if (mock) {
+          setProjects((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("projects", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: ProjectData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProjectData));
       setProjects((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -878,6 +910,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 5. Experience listener
     const unsubExperience = onSnapshot(collection(db, "users", uid, "experience"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+        if (mock) {
+          setExperience((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("experience", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: ExperienceData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ExperienceData));
       setExperience((prev) => (isCollectionEqual(prev, list) ? prev : list));
@@ -887,6 +927,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 6. Certifications listener
     const unsubCertifications = onSnapshot(collection(db, "users", uid, "certifications"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+        if (mock) {
+          setCertifications((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("certifications", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: CertificationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as CertificationData));
       setCertifications((prev) => (isCollectionEqual(prev, list) ? prev : list));

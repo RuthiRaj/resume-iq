@@ -11,7 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Modal } from "@/components/ui/modal";
-import { EmptyState, ErrorAlert, ToastBanner } from "@/components/common/state-views";
+import { EmptyState, ErrorAlert, LoadingState, ToastBanner } from "@/components/common/state-views";
+import { filterResumes } from "@/lib/resume-filter";
 import { formatDate } from "@/lib/utils";
 import {
   FileText,
@@ -33,7 +34,15 @@ import {
 
 export default function ResumesPage() {
   const router = useRouter();
-  const { resumes, duplicateResume, deleteResume, updateResume } = useCareer();
+  const {
+    resumes,
+    duplicateResume,
+    deleteResume,
+    updateResume,
+    isLoaded,
+    workspaceLoadErrors,
+    retryWorkspaceLoad,
+  } = useCareer();
   const { user } = useAuth();
 
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -74,14 +83,7 @@ export default function ResumesPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
-  const filtered = resumes.filter((r) => {
-    const query = (searchQuery ?? "").toLowerCase();
-    return (
-      (r.title ?? "").toLowerCase().includes(query) ||
-      (r.targetRole ?? "").toLowerCase().includes(query) ||
-      (r.targetCompany ?? "").toLowerCase().includes(query)
-    );
-  });
+  const filtered = filterResumes(resumes, searchQuery);
 
   const handleOpenRename = (r: ResumeItem) => {
     setRenameItem(r);
@@ -312,7 +314,15 @@ export default function ResumesPage() {
       </div>
 
       {/* Content */}
-      {filtered.length === 0 ? (
+      {!isLoaded ? (
+        <LoadingState text="Loading your resumes..." />
+      ) : workspaceLoadErrors.includes("resumes") || workspaceLoadErrors.length > 0 ? (
+        <ErrorAlert
+          title="Failed to load resumes"
+          message="Could not load your saved resumes from the cloud database. Check your network or shield settings."
+          onRetry={retryWorkspaceLoad}
+        />
+      ) : filtered.length === 0 ? (
         <EmptyState
           title="No resumes found"
           description="Create your first tailored resume using our AI Builder or adjust your search filter."
