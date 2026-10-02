@@ -87,7 +87,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
@@ -108,7 +108,8 @@ jobs:
 
       - name: Guard - no E2E mocks in production bundle
         run: |
-          if grep -r "__E2E_MOCK" frontend/.next/static; then
+          test -d .next/static || { echo "build output not found"; exit 1; }
+          if grep -r "__E2E_MOCK" .next/static; then
             echo "E2E mock code found in production bundle"; exit 1
           fi
 
@@ -144,7 +145,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
