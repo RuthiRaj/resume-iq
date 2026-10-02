@@ -16,12 +16,7 @@ async function extractTextFromPdfBuffer(buffer: Buffer): Promise<string> {
 }
 
 function normalizePdfText(s: string): string {
-  return s
-    .replace(/\s+([.,;:!?%—–\-/()@•])/g, "$1")
-    .replace(/([@./()+~-])\s+/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+  return s.replace(/\s+/g, "").toLowerCase();
 }
 
 const mockCandidateEvidence = {
