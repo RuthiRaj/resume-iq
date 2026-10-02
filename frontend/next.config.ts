@@ -3,6 +3,10 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
+  env: {
+    NEXT_PUBLIC_E2E: process.env.NEXT_PUBLIC_E2E ?? "false",
+    NEXT_PUBLIC_E2E_TEST_MODE: process.env.NEXT_PUBLIC_E2E_TEST_MODE ?? "false",
+  },
   async redirects() {
     return [
       {
