@@ -53,14 +53,67 @@
 }
 
 /* Print Styles */
+@page {
+  size: A4;
+  margin: 12mm 14mm 12mm 14mm;
+}
+
 @media print {
-  body {
-    background: white !important;
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+    text-shadow: none !important;
   }
-  .no-print {
+
+  html,
+  body {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    min-height: 100% !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* App shell / chrome suppression */
+  header,
+  nav,
+  aside,
+  .no-print,
+  [data-no-print="true"],
+  button,
+  input,
+  textarea,
+  select {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
+
+  /* Container normalization */
+  .resume-print-wrapper {
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  /* Prevent awkward page breaks inside logical entries */
+  .break-inside-avoid,
+  .resume-entry-avoid-break {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
 }
+

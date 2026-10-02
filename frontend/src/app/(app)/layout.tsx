@@ -32,15 +32,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-page">
+    <div className="flex h-screen w-screen overflow-hidden bg-page print:h-auto print:w-auto print:overflow-visible print:bg-white print:block">
       {/* Desktop Fixed Left Sidebar */}
-      <div className="hidden md:flex h-full flex-shrink-0">
+      <div className="hidden md:flex h-full flex-shrink-0 print:hidden no-print">
         <AppSidebar />
       </div>
 
       {/* Mobile Drawer Backdrop & Sidebar */}
       {isMobileMenuOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div className="fixed inset-0 z-50 flex md:hidden print:hidden no-print">
           <div
             className="fixed inset-0 bg-primary/40 transition-opacity"
             onClick={() => setIsMobileMenuOpen(false)}
@@ -52,16 +52,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Main Content Area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <AppHeader onOpenMobileMenu={() => setIsMobileMenuOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          <div className="mx-auto max-w-7xl space-y-6">{children}</div>
+      <div className="flex flex-1 flex-col overflow-hidden print:overflow-visible print:h-auto print:w-full print:block">
+        <div className="print:hidden no-print">
+          <AppHeader onOpenMobileMenu={() => setIsMobileMenuOpen(true)} />
+        </div>
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 print:p-0 print:m-0 print:overflow-visible print:h-auto print:w-full print:block">
+          <div className="mx-auto max-w-7xl space-y-6 print:m-0 print:p-0 print:max-w-none print:w-full print:space-y-0 print:block">{children}</div>
         </main>
       </div>
 
       {/* Workspace is the source of truth: auto-refresh stale tailored resumes */}
-      <WorkspaceAutoRefresh />
-      <GlobalToastHost />
+      <div className="print:hidden no-print">
+        <WorkspaceAutoRefresh />
+        <GlobalToastHost />
+      </div>
     </div>
   );
 }

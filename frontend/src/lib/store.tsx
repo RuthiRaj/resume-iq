@@ -572,6 +572,7 @@ interface CareerContextType {
   workspaceLoadErrors: string[];
   /** Increments on every real workspace data change (post initial load). */
   workspaceRevision: number;
+  retryWorkspaceLoad: () => void;
 }
 
 
@@ -584,24 +585,77 @@ const normalizeResume = (id: string, data: FirestoreDocumentData): ResumeItem =>
     tags: Array.isArray(data.tags) ? data.tags : [],
   }) as ResumeItem;
 
-export function CareerProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+/**
+ * Build-time gate for E2E test mocks (PR1-C1).
+ * NEXT_PUBLIC_* values are inlined at `next build` time, so in a production
+ * build made WITHOUT the flag this whole branch compiles to `false` and
+ * mock data can never activate — even if a user sets localStorage keys
+ * or injects `window.__E2E_MOCK_*` from the console.
+ */
+export const isE2EMockEnabled = (): boolean =>
+  process.env.NEXT_PUBLIC_E2E === "true" ||
+  process.env.NEXT_PUBLIC_E2E_TEST_MODE === "true";
 
-  const [profile, setProfile] = useState<ProfileData>(defaultEmptyProfile);
-  const [education, setEducation] = useState<EducationData[]>([]);
-  const [skills, setSkills] = useState<SkillData[]>([]);
-  const [projects, setProjects] = useState<ProjectData[]>([]);
-  const [experience, setExperience] = useState<ExperienceData[]>([]);
-  const [certifications, setCertifications] = useState<CertificationData[]>([]);
+const readE2EMockArray = (key: string): any[] | null => {
+  if (!isE2EMockEnabled()) return null;
+  if (typeof window === "undefined") return null;
+  const value = (window as any)[key];
+  return Array.isArray(value) ? value : null;
+};
+
+const readE2EMockProfile = (): any | null => {
+  if (!isE2EMockEnabled()) return null;
+  if (typeof window === "undefined") return null;
+  return (window as any).__E2E_MOCK_PROFILE__ ?? null;
+};
+
+const getE2EMockResumes = (): ResumeItem[] | null => {
+  if (!isE2EMockEnabled()) return null;
+  if (
+    typeof window === "undefined" ||
+    window.localStorage.getItem("e2e_bypass_auth") !== "true" ||
+    !Array.isArray((window as any).__E2E_MOCK_RESUMES__)
+  ) {
+    return null;
+  }
+  return (window as any).__E2E_MOCK_RESUMES__.map((resume: ResumeItem) => normalizeResume(resume.id, resume));
+};
+
+export function CareerProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading: authLoading } = useAuth();
+
+  const [profile, setProfile] = useState<ProfileData>(() => {
+    return readE2EMockProfile() ?? defaultEmptyProfile;
+  });
+  const [education, setEducation] = useState<EducationData[]>(() => {
+    return readE2EMockArray("__E2E_MOCK_EDUCATION__") ?? [];
+  });
+  const [skills, setSkills] = useState<SkillData[]>(() => {
+    return readE2EMockArray("__E2E_MOCK_SKILLS__") ?? [];
+  });
+  const [projects, setProjects] = useState<ProjectData[]>(() => {
+    return readE2EMockArray("__E2E_MOCK_PROJECTS__") ?? [];
+  });
+  const [experience, setExperience] = useState<ExperienceData[]>(() => {
+    return readE2EMockArray("__E2E_MOCK_EXPERIENCE__") ?? [];
+  });
+  const [certifications, setCertifications] = useState<CertificationData[]>(() => {
+    return readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__") ?? [];
+  });
   const [achievements, setAchievements] = useState<AchievementData[]>([]);
   const [documents, setDocuments] = useState<DocumentData[]>([]);
-  const [resumes, setResumes] = useState<ResumeItem[]>([]);
+  const [resumes, setResumes] = useState<ResumeItem[]>(() => getE2EMockResumes() || []);
   const [actions, setActions] = useState<RecommendedAction[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [workspaceLoadErrors, setWorkspaceLoadErrors] = useState<string[]>([]);
   // Bumps every time workspace data actually changes (after initial load).
   // Drives automatic refresh of workspace-sourced tailored resumes.
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
+  const [retryTrigger, setRetryTrigger] = useState(0);
+
+  const retryWorkspaceLoad = useCallback(() => {
+    setRetryTrigger((prev) => prev + 1);
+  }, []);
 
   // Keep refs for callbacks needing fresh state without re-creating identity
   const resumesRef = useRef<ResumeItem[]>(resumes);
@@ -626,6 +680,10 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
   // Set up real-time Firestore listeners scoped strictly to user.uid
   useEffect(() => {
+    if (authLoading) {
+      setIsLoaded(false);
+      return;
+    }
     const uid = user?.uid;
     // Reset load state on account change so a new user never briefly sees
     // the previous user's data as "loaded".
@@ -633,26 +691,85 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
     setWorkspaceLoadErrors([]);
     setWorkspaceRevision(0);
     if (!uid) {
-      setProfile(defaultEmptyProfile);
-      setEducation([]);
-      setSkills([]);
-      setProjects([]);
-      setExperience([]);
-      setCertifications([]);
+      const mockProfile = readE2EMockProfile();
+      if (mockProfile) {
+        setProfile(mockProfile);
+        setEducation(readE2EMockArray("__E2E_MOCK_EDUCATION__") ?? []);
+        setSkills(readE2EMockArray("__E2E_MOCK_SKILLS__") ?? []);
+        setProjects(readE2EMockArray("__E2E_MOCK_PROJECTS__") ?? []);
+        setExperience(readE2EMockArray("__E2E_MOCK_EXPERIENCE__") ?? []);
+        setCertifications(readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__") ?? []);
+      } else {
+        setProfile(defaultEmptyProfile);
+        setEducation([]);
+        setSkills([]);
+        setProjects([]);
+        setExperience([]);
+        setCertifications([]);
+      }
       setAchievements([]);
       setDocuments([]);
-      setResumes([]);
+      setResumes(getE2EMockResumes() || []);
       setActions([]);
       setIsLoaded(true);
       return;
     }
 
+    if (isE2EMockEnabled() && typeof window !== "undefined") {
+      const mockProfile = readE2EMockProfile();
+      if (mockProfile) {
+        setProfile(mockProfile);
+      }
+      const mockExperience = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+      if (mockExperience) {
+        setExperience(mockExperience);
+      }
+      const mockEducation = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+      if (mockEducation) {
+        setEducation(mockEducation);
+      }
+      const mockSkills = readE2EMockArray("__E2E_MOCK_SKILLS__");
+      if (mockSkills) {
+        setSkills(mockSkills);
+      }
+      const mockProjects = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+      if (mockProjects) {
+        setProjects(mockProjects);
+      }
+      const mockCerts = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+      if (mockCerts) {
+        setCertifications(mockCerts);
+      }
+      const mockResumesPrefill = getE2EMockResumes();
+      if (mockResumesPrefill) {
+        setResumes(mockResumesPrefill);
+      }
+    }
+
     // Track initial load of all 10 collections before marking loaded
+    const ALL_COLLECTIONS = [
+      "profile",
+      "education",
+      "skills",
+      "projects",
+      "experience",
+      "certifications",
+      "achievements",
+      "documents",
+      "resumes",
+      "actions",
+    ];
     const initialLoadedSet = new Set<string>();
     const failedSet = new Set<string>();
-    const markLoaded = (name: string) => {
+    const cacheOnlySet = new Set<string>();
+    const markLoaded = (name: string, fromCache?: boolean) => {
       initialLoadedSet.add(name);
+      if (fromCache) cacheOnlySet.add(name);
       if (initialLoadedSet.size >= 10) {
+        if (cacheOnlySet.size === initialLoadedSet.size && failedSet.size === 0) {
+          console.warn("[workspace] All Firestore snapshots came from cache — backend unreachable.");
+          setWorkspaceLoadErrors(["resumes"]);
+        }
         setIsLoaded(true);
       }
     };
@@ -663,8 +780,48 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       console.error(`[workspace] Firestore listener failed for "${name}":`, err);
       failedSet.add(name);
       setWorkspaceLoadErrors(Array.from(failedSet));
+      if (isE2EMockEnabled() && typeof window !== "undefined") {
+        if (name === "profile") {
+          const mockProfile = readE2EMockProfile();
+          if (mockProfile) setProfile(mockProfile);
+        }
+        if (name === "experience") {
+          const mockExperience = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+          if (mockExperience) setExperience(mockExperience);
+        }
+        if (name === "education") {
+          const mockEducation = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+          if (mockEducation) setEducation(mockEducation);
+        }
+        if (name === "skills") {
+          const mockSkills = readE2EMockArray("__E2E_MOCK_SKILLS__");
+          if (mockSkills) setSkills(mockSkills);
+        }
+        if (name === "projects") {
+          const mockProjects = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+          if (mockProjects) setProjects(mockProjects);
+        }
+        if (name === "certifications") {
+          const mockCerts = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+          if (mockCerts) setCertifications(mockCerts);
+        }
+        if (name === "resumes") {
+          const mockResumes = getE2EMockResumes();
+          if (mockResumes) setResumes(mockResumes);
+        }
+      }
       markLoaded(name);
     };
+
+    // Safety timeout: if Firestore connection is blocked (e.g. Brave Shields) or hung,
+    // settle pending listeners as failed so the UI renders gracefully with error state.
+    const safetyTimeoutId = setTimeout(() => {
+      ALL_COLLECTIONS.forEach((name) => {
+        if (!initialLoadedSet.has(name)) {
+          markFailed(name, new Error(`Firestore listener connection timed out for ${name}`));
+        }
+      });
+    }, 1200);
     // Called on every workspace snapshot update AFTER the initial load, so the
     // revision only moves when data actually changes (local edits, other
     // devices, or the resync flow writing back). Initial-load snapshots are
@@ -677,6 +834,14 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
 
     // 1. Profile listener
     const unsubProfile = onSnapshot(doc(db, "users", uid, "profile", "main"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mockProfile = readE2EMockProfile();
+        if (mockProfile) {
+          setProfile((prev) => (isCollectionEqual(prev, mockProfile) ? prev : mockProfile));
+          markLoaded("profile", snap.metadata.fromCache);
+          return;
+        }
+      }
       if (snap.exists()) {
         const data = snap.data() as ProfileData;
         setProfile((prev) => (isCollectionEqual(prev, data) ? prev : data));
@@ -688,52 +853,92 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
         };
         setProfile((prev) => (isCollectionEqual(prev, fallback) ? prev : fallback));
       }
-      markLoaded("profile");
+      markLoaded("profile", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("profile", err));
 
     // 2. Education listener
     const unsubEducation = onSnapshot(collection(db, "users", uid, "education"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_EDUCATION__");
+        if (mock) {
+          setEducation((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("education", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: EducationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as EducationData));
       setEducation((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("education");
+      markLoaded("education", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("education", err));
 
     // 3. Skills listener
     const unsubSkills = onSnapshot(collection(db, "users", uid, "skills"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_SKILLS__");
+        if (mock) {
+          setSkills((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("skills", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: SkillData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as SkillData));
       setSkills((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("skills");
+      markLoaded("skills", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("skills", err));
 
     // 4. Projects listener
     const unsubProjects = onSnapshot(collection(db, "users", uid, "projects"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_PROJECTS__");
+        if (mock) {
+          setProjects((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("projects", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: ProjectData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ProjectData));
       setProjects((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("projects");
+      markLoaded("projects", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("projects", err));
 
     // 5. Experience listener
     const unsubExperience = onSnapshot(collection(db, "users", uid, "experience"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_EXPERIENCE__");
+        if (mock) {
+          setExperience((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("experience", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: ExperienceData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as ExperienceData));
       setExperience((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("experience");
+      markLoaded("experience", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("experience", err));
 
     // 6. Certifications listener
     const unsubCertifications = onSnapshot(collection(db, "users", uid, "certifications"), (snap) => {
+      if (isE2EMockEnabled()) {
+        const mock = readE2EMockArray("__E2E_MOCK_CERTIFICATIONS__");
+        if (mock) {
+          setCertifications((prev) => (isCollectionEqual(prev, mock) ? prev : mock));
+          markLoaded("certifications", snap.metadata.fromCache);
+          return;
+        }
+      }
       const list: CertificationData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as CertificationData));
       setCertifications((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("certifications");
+      markLoaded("certifications", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("certifications", err));
 
@@ -742,7 +947,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: AchievementData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as AchievementData));
       setAchievements((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("achievements");
+      markLoaded("achievements", snap.metadata.fromCache);
       noteWorkspaceActivity();
     }, (err) => markFailed("achievements", err));
 
@@ -751,26 +956,32 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       const list: DocumentData[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as DocumentData));
       setDocuments((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("documents");
+      markLoaded("documents", snap.metadata.fromCache);
     }, (err) => markFailed("documents", err));
 
     // 9. Resumes listener
     const unsubResumes = onSnapshot(collection(db, "users", uid, "resumes"), (snap) => {
       const list: ResumeItem[] = [];
       snap.forEach((d) => list.push(normalizeResume(d.id, d.data())));
+      list.push(...(getE2EMockResumes() || []));
       setResumes((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("resumes");
-    }, (err) => markFailed("resumes", err));
+      markLoaded("resumes", snap.metadata.fromCache);
+    }, (err) => {
+      const mockResumes = getE2EMockResumes();
+      if (mockResumes) setResumes(mockResumes);
+      markFailed("resumes", err);
+    });
 
     // 10. Actions listener
     const unsubActions = onSnapshot(collection(db, "users", uid, "actions"), (snap) => {
       const list: RecommendedAction[] = [];
       snap.forEach((d) => list.push({ id: d.id, ...d.data() } as RecommendedAction));
       setActions((prev) => (isCollectionEqual(prev, list) ? prev : list));
-      markLoaded("actions");
+      markLoaded("actions", snap.metadata.fromCache);
     }, (err) => markFailed("actions", err));
 
     return () => {
+      clearTimeout(safetyTimeoutId);
       unsubProfile();
       unsubEducation();
       unsubSkills();
@@ -782,7 +993,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       unsubResumes();
       unsubActions();
     };
-  }, [user?.uid]);
+  }, [user?.uid, authLoading, retryTrigger]);
 
 
   // Profile persistence via backend API proxy
@@ -1283,6 +1494,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       isLoaded,
       workspaceLoadErrors,
       workspaceRevision,
+      retryWorkspaceLoad,
     }),
     [
       profile,
@@ -1326,6 +1538,7 @@ export function CareerProvider({ children }: { children: React.ReactNode }) {
       isLoaded,
       workspaceLoadErrors,
       workspaceRevision,
+      retryWorkspaceLoad,
     ]
   );
 

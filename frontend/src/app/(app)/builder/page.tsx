@@ -56,22 +56,19 @@ function BuilderContent() {
   // Active working resume
   const existingResume = resumes.find((r) => r.id === resumeIdParam);
 
+  // PR1-M5: initialize to safe defaults only. existingResume is undefined on
+  // first render (resumes load async); the sync effect below populates state
+  // when it arrives (resumeChanged) instead of freezing a stale snapshot.
   const [activeTemplate, setActiveTemplate] = useState<"modern" | "minimal" | "professional" | "ats">(
-    existingResume ? existingResume.template : "modern"
+    "modern"
   );
-  const [resumeTitle, setResumeTitle] = useState(
-    existingResume ? existingResume.title : "Tailored Resume"
-  );
+  const [resumeTitle, setResumeTitle] = useState("Tailored Resume");
   const [targetRole, setTargetRole] = useState(
-    existingResume ? existingResume.targetRole : (profile.targetRoles?.[0] || "Software Engineer")
+    profile.targetRoles?.[0] || "Software Engineer"
   );
-  const [targetCompany, setTargetCompany] = useState(
-    existingResume ? (existingResume.targetCompany || "") : ""
-  );
-  const [jobDescription, setJobDescription] = useState<string>(
-    existingResume?.jobDescription || ""
-  );
-  const [showJdPanel, setShowJdPanel] = useState(Boolean(existingResume?.jobDescription));
+  const [targetCompany, setTargetCompany] = useState("");
+  const [jobDescription, setJobDescription] = useState<string>("");
+  const [showJdPanel, setShowJdPanel] = useState(false);
 
   // Current fit / ATS score from resume
   const currentFitScore = existingResume?.currentScore ?? existingResume?.atsScore ?? existingResume?.score ?? null;
@@ -93,27 +90,36 @@ function BuilderContent() {
   }, [jobDescription, skills, existingResume?.analysisResults]);
 
   // Section level custom overrides
-  const [customSummary, setCustomSummary] = useState(
-    existingResume?.sections.summary || profile.summary
-  );
+  // PR1-M5: default only; synced from existingResume by the effect below.
+  const [customSummary, setCustomSummary] = useState(profile.summary || "");
   const deferredCustomSummary = useDeferredValue(customSummary);
 
   // Selected entities included in this resume
   const [selectedExpIds, setSelectedExpIds] = useState<string[]>(
-    existingResume?.sections.experiences || experience.map((e) => e.id || "")
+    experience.map((e) => e.id || "")
   );
   const [selectedProjIds, setSelectedProjIds] = useState<string[]>(
-    existingResume?.sections.projects || projects.map((p) => p.id || "")
+    projects.map((p) => p.id || "")
   );
 
   // AI regeneration status
   const [isRegeneratingSection, setIsRegeneratingSection] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
+  // PR1-M5: track the toast timer so rapid toasts reset it and unmount clears it.
+  const toastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 3500);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   };
+
+  React.useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   // AI Role Generate Modal State
   const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
@@ -125,9 +131,47 @@ function BuilderContent() {
 
   // Active section tab in editor sidebar
   const [activeTab, setActiveTab] = useState<"summary" | "experience" | "projects" | "skills" | "template">("summary");
+  const lastResumeIdRef = React.useRef<string | null>(null);
+  const resumeTitleRef = React.useRef<HTMLInputElement>(null);
+  const targetRoleRef = React.useRef<HTMLInputElement>(null);
+  const targetCompanyRef = React.useRef<HTMLInputElement>(null);
+  const jobDescriptionRef = React.useRef<HTMLTextAreaElement>(null);
+  const customSummaryRef = React.useRef<HTMLTextAreaElement>(null);
 
   // Keep builder selection in sync with real-time career evidence updates
   useEffect(() => {
+    const resumeId = existingResume?.id ?? null;
+    const resumeChanged = resumeId !== lastResumeIdRef.current;
+    lastResumeIdRef.current = resumeId;
+
+    const isFocused = (ref: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>) =>
+      typeof document !== "undefined" && document.activeElement === ref.current;
+
+    if (existingResume) {
+      if (resumeChanged || !isFocused(resumeTitleRef)) {
+        setResumeTitle(existingResume.title || "Tailored Resume");
+      }
+      if (resumeChanged || !isFocused(targetRoleRef)) {
+        setTargetRole(existingResume.targetRole || profile.targetRoles?.[0] || "Software Engineer");
+      }
+      if (resumeChanged || !isFocused(targetCompanyRef)) {
+        setTargetCompany(existingResume.targetCompany || "");
+      }
+      if (resumeChanged || !isFocused(jobDescriptionRef)) {
+        setJobDescription(existingResume.jobDescription || "");
+        setShowJdPanel(Boolean(existingResume.jobDescription));
+      }
+      if (resumeChanged || !isFocused(customSummaryRef)) {
+        setCustomSummary(existingResume.sections?.summary || profile.summary || "");
+      }
+      if (resumeChanged) {
+        setSelectedExpIds(existingResume.sections?.experiences || experience.map((item) => item.id || ""));
+        setSelectedProjIds(existingResume.sections?.projects || projects.map((item) => item.id || ""));
+        if (existingResume.template) setActiveTemplate(existingResume.template);
+      }
+      return;
+    }
+
     if (!existingResume) {
       if (experience.length > 0) {
         setSelectedExpIds((prev) => {
@@ -143,8 +187,10 @@ function BuilderContent() {
           return prev.length === newIds.length && prev.every((id, i) => id === newIds[i]) ? prev : newIds;
         });
       }
-      setCustomSummary((prev) => prev || profile.summary);
-      setTargetRole((prev) => (prev === "Software Engineer" && profile.targetRoles?.[0] ? profile.targetRoles[0] : prev));
+      if (!isFocused(customSummaryRef)) setCustomSummary((prev) => prev || profile.summary || "");
+      if (!isFocused(targetRoleRef)) {
+        setTargetRole((prev) => (prev === "Software Engineer" && profile.targetRoles?.[0] ? profile.targetRoles[0] : prev));
+      }
     }
   }, [experience, projects, profile.summary, profile.targetRoles, existingResume]);
 
@@ -368,9 +414,9 @@ function BuilderContent() {
 
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 print:space-y-0 print:p-0 print:m-0 print:w-full">
       {/* Top Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4 print:hidden no-print">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-h1 font-semibold text-primary">Resume Builder & Live Editor</h1>
@@ -411,13 +457,15 @@ function BuilderContent() {
       </div>
 
       {toast && (
-        <ToastBanner message={toast.message} type={toast.type} />
+        <div className="print:hidden no-print">
+          <ToastBanner message={toast.message} type={toast.type} />
+        </div>
       )}
 
-      {/* Main Split Layout: Editor Sidebar (Left) & Live Preview (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Main Split Layout: Editor Controls Sidebar (Left) & Live Preview (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 print:block print:w-full print:m-0 print:p-0">
         {/* Editor Controls Sidebar (5 cols) */}
-        <div className="lg:col-span-5 space-y-4">
+        <div className="lg:col-span-5 space-y-4 print:hidden no-print">
           {/* Metadata Card with Target Context */}
           <Card>
             <CardContent className="p-4 space-y-3">
@@ -426,6 +474,7 @@ function BuilderContent() {
                   Resume Title
                 </label>
                 <Input
+                  ref={resumeTitleRef}
                   value={resumeTitle}
                   onChange={(e) => setResumeTitle(e.target.value)}
                   placeholder="e.g. Senior Frontend Engineer — Stripe"
@@ -438,6 +487,7 @@ function BuilderContent() {
                     Target Role
                   </label>
                   <Input
+                    ref={targetRoleRef}
                     value={targetRole}
                     onChange={(e) => setTargetRole(e.target.value)}
                     placeholder="e.g. Senior Frontend"
@@ -448,6 +498,7 @@ function BuilderContent() {
                     Company
                   </label>
                   <Input
+                    ref={targetCompanyRef}
                     value={targetCompany}
                     onChange={(e) => setTargetCompany(e.target.value)}
                     placeholder="e.g. Stripe"
@@ -497,6 +548,7 @@ function BuilderContent() {
                         </span>
                       </div>
                       <Textarea
+                        ref={jobDescriptionRef}
                         rows={4}
                         value={jobDescription}
                         onChange={(e) => setJobDescription(e.target.value)}
@@ -630,6 +682,7 @@ function BuilderContent() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <Textarea
+                  ref={customSummaryRef}
                   rows={6}
                   value={customSummary}
                   onChange={(e) => setCustomSummary(e.target.value)}
@@ -779,9 +832,9 @@ function BuilderContent() {
           )}
         </div>
 
-        {/* Live Side-by-Side Preview (7 cols) */}
-        <div className="lg:col-span-7 space-y-3">
-          <div className="flex items-center justify-between text-caption font-semibold text-secondary">
+        {/* Live Side-by-Side Preview (7 cols on screen, full-width on print) */}
+        <div className="lg:col-span-7 space-y-3 print:col-span-12 print:w-full print:m-0 print:p-0 print:space-y-0 print:block">
+          <div className="flex items-center justify-between text-caption font-semibold text-secondary print:hidden no-print">
             <span>LIVE RESUME PREVIEW &bull; A4 SCALE</span>
             <div className="flex items-center gap-2">
               <span className="rounded bg-page border border-border px-2 py-0.5 text-[10px] uppercase font-mono">
@@ -791,7 +844,7 @@ function BuilderContent() {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-card border border-border bg-[#E4E7EC]/40 p-4">
+          <div className="overflow-x-auto rounded-card border border-border bg-[#E4E7EC]/40 p-4 print:border-none print:bg-white print:p-0 print:m-0 print:overflow-visible print:w-full resume-print-wrapper">
             <ResumeUniversalRenderer template={activeTemplate} data={resumeDataForRender} />
           </div>
         </div>
@@ -799,13 +852,14 @@ function BuilderContent() {
 
       {/* AI Generate Role Resume Modal */}
       {isGenerateModalOpen && (
-        <Modal
-          isOpen={true}
-          onClose={() => setIsGenerateModalOpen(false)}
-          title="AI Generate Role-Targeted Resume"
-          description="Ranks your workspace career evidence and tailors bullets and executive summary with strict anti-hallucination verification."
-          maxWidth="lg"
-        >
+        <div className="print:hidden no-print">
+          <Modal
+            isOpen={true}
+            onClose={() => setIsGenerateModalOpen(false)}
+            title="AI Generate Role-Targeted Resume"
+            description="Ranks your workspace career evidence and tailors bullets and executive summary with strict anti-hallucination verification."
+            maxWidth="lg"
+          >
           <div className="space-y-4">
             {generateError && <ErrorAlert message={generateError} />}
 
@@ -875,6 +929,7 @@ function BuilderContent() {
             </div>
           </div>
         </Modal>
+        </div>
       )}
     </div>
   );
