@@ -136,7 +136,6 @@ test.describe("Bug A: Resume Print / PDF Export Quality & Chrome Suppression Sui
   }) => {
     const targetDirs = [
       path.resolve(__dirname, "../test-results/print-export"),
-      "C:\\Users\\gosul\\.gemini\\antigravity\\brain\\7f7638eb-8698-4666-af73-e8d95afc5bd1",
     ];
     for (const dir of targetDirs) {
       fs.mkdirSync(dir, { recursive: true });
@@ -264,7 +263,6 @@ test.describe("Bug A: Resume Print / PDF Export Quality & Chrome Suppression Sui
   test("Every template in Layout & Theme prints correctly (Modern, Minimal, ATS)", async ({ page }) => {
     const targetDirs = [
       path.resolve(__dirname, "../test-results/print-export"),
-      "C:\\Users\\gosul\\.gemini\\antigravity\\brain\\7f7638eb-8698-4666-af73-e8d95afc5bd1",
     ];
     for (const dir of targetDirs) {
       fs.mkdirSync(dir, { recursive: true });
@@ -505,7 +503,6 @@ test.describe("Bug A: Multi-page Print Margin Suite (2+ Pages)", () => {
   }) => {
     const targetDirs = [
       path.resolve(__dirname, "../test-results/print-export"),
-      "C:\\Users\\gosul\\.gemini\\antigravity\\brain\\7f7638eb-8698-4666-af73-e8d95afc5bd1",
     ];
     for (const dir of targetDirs) {
       fs.mkdirSync(dir, { recursive: true });
