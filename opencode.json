@@ -1,0 +1,36 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "github": {
+      "type": "remote",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": { "Authorization": "Bearer {env:GITHUB_PAT}" },
+      "enabled": true
+    }
+  },
+  "permission": {
+    "edit": "allow",
+    "webfetch": "allow",
+    "read": {
+      "*": "allow",
+      "**/.env": "deny",
+      "**/.env.*": "deny",
+      "**/.env.example": "allow"
+    },
+    "bash": {
+      "*": "allow",
+      "git push --force*": "deny",
+      "git push * --force*": "deny",
+      "git push origin main*": "deny",
+      "git push * --delete*": "deny",
+      "rm -rf *": "deny"
+    },
+    "github_*": "allow",
+    "github_push_files": "ask",
+    "github_create_or_update_file": "ask",
+    "github_merge_pull_request": "ask",
+    "github_delete_file": "deny",
+    "github_create_repository": "deny",
+    "github_fork_repository": "deny"
+  }
+}
